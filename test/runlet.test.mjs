@@ -8,6 +8,29 @@ const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'runlet-test-'));
 process.env.RUNLET_STATE_DIR = path.join(temporaryRoot, 'state');
 const runlet = await import('../src/workspaces.mjs');
 
+function simplePdf(text) {
+  const escaped = String(text).replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
+  const stream = `BT /F1 18 Tf 72 720 Td (${escaped}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let source = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(source));
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = Buffer.byteLength(source);
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  source += offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(source, 'ascii');
+}
+
 test.after(async () => {
   await fs.rm(temporaryRoot, { recursive: true, force: true });
 });
@@ -69,6 +92,36 @@ test('creates and runs a Script', async () => {
   const binary = Buffer.from([0, 1, 2, 255]);
   await runlet.writeScriptOutput(current.id, 'copy-text', 'nested/result.bin', binary);
   assert.deepEqual(await fs.readFile(path.join(current.path, 'scripts/copy-text/outputs/nested/result.bin')), binary);
+});
+
+test('Scripts can extract PDF text and use bundled CSV and ZIP helpers', async () => {
+  const current = await runlet.getCurrentWorkspace();
+  await runlet.createScript({
+    workspaceId: current.id,
+    slug: 'document-tools',
+    name: 'Document Tools',
+    description: 'Exercise the bundled document helpers.',
+    results: [{ type: 'table', label: 'Result', path: 'outputs/result.csv' }],
+    readme: '# Document Tools\n\nExercise the bundled document helpers.\n',
+    runJs: `export default async function ({ workspace, run, pdf, csv, zip }) {
+      const source = await workspace.readBytes('scripts/document-tools/inputs/invoice.pdf');
+      const text = await pdf.extractText(source);
+      const archive = zip.create({ 'invoice.txt': text });
+      await workspace.writeBytes('scripts/document-tools/outputs/invoice.zip', archive);
+      const restored = zip.extract(archive);
+      const restoredText = new TextDecoder().decode(restored['invoice.txt']);
+      const rows = csv.parse('name,quantity\\nWalnuts,4\\n', { columns: true });
+      rows.push({ name: restoredText, quantity: 1 });
+      await workspace.write('scripts/document-tools/outputs/result.csv', csv.stringify(rows, { header: true, columns: ['name', 'quantity'] }));
+      run.log('Processed invoice.pdf');
+    }`,
+  });
+  await runlet.writeScriptInput(current.id, 'document-tools', 'invoice.pdf', simplePdf('Invoice BAK-0020'));
+
+  const result = await runlet.runScript(current.id, 'document-tools');
+  assert.deepEqual(result.logs, ['Processed invoice.pdf']);
+  assert.match(await runlet.readFile(current.id, 'scripts/document-tools/outputs/result.csv'), /Invoice BAK-0020,1/);
+  assert.ok((await fs.stat(path.join(current.path, 'scripts/document-tools/outputs/invoice.zip'))).size > 0);
 });
 
 test('creates, lists, and edits a reusable Prompt', async () => {

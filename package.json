@@ -1,10 +1,10 @@
 {
   "name": "runlet-local",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "bin": {
     "runlet": "./bin/runlet.mjs"
@@ -18,7 +18,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "csv-parse": "^7.0.2",
+    "csv-stringify": "^6.8.3",
     "express": "^5.2.1",
+    "fflate": "^0.8.3",
+    "pdfjs-dist": "^6.3.289",
     "zod": "^4.5.4"
   }
 }

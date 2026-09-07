@@ -18,6 +18,8 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/vijja-w/runlet/main/install.ps1 | iex
 ```
 
+Run the same one-line command again whenever you want to update Runlet to the latest release. Your workspace folders and registrations are kept.
+
 Then start Runlet:
 
 ```bash
@@ -57,7 +59,7 @@ This is Runlet’s pre-desktop-app distribution method. A future desktop wrapper
 
 ## Local development
 
-Development requires Node.js 22 or newer:
+Development requires Node.js 22.13 or newer:
 
 ```bash
 npm install
@@ -135,13 +137,37 @@ export default async function ({ workspace, run, input }) {
 Available APIs:
 
 - `workspace.read(path)`
+- `workspace.readBytes(path)`
 - `workspace.write(path, data)`
+- `workspace.writeBytes(path, data)`
 - `workspace.list(path)`
 - `workspace.exists(path)`
 - `workspace.mkdir(path)`
 - `workspace.delete(path)`
 - `workspace.fetch(httpsUrl, options)`
 - `run.log(message)`
+
+Runlet also bundles a small standard library for common file work:
+
+- `pdf.extractText(bytes)` extracts text from a text-based PDF.
+- `csv.parse(text, options)` reads CSV into rows.
+- `csv.stringify(rows, options)` creates valid CSV text.
+- `zip.extract(bytes)` reads a ZIP archive into files.
+- `zip.create(files, options)` creates a ZIP archive.
+
+Use `workspace.readBytes()` and `workspace.writeBytes()` with PDFs, ZIP archives, and other binary files. Scripts receive the helpers they need in their function arguments:
+
+```js
+export default async function ({ workspace, run, pdf, csv }) {
+  const source = await workspace.readBytes('scripts/invoice-import/inputs/invoice.pdf');
+  const text = await pdf.extractText(source);
+  const output = csv.stringify([['source', 'text'], ['invoice.pdf', text]]);
+  await workspace.write('scripts/invoice-import/outputs/invoices.csv', output);
+  run.log('Created invoices.csv');
+}
+```
+
+PDF text extraction does not perform OCR. Scanned image-only PDFs need a separate OCR capability.
 
 Paths are relative to the registered workspace. Scripts have a 30-second limit and a 128 MB worker memory limit.
 

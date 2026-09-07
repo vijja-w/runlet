@@ -25,7 +25,7 @@ When asked to create or update a Script:
 7. Prefer Runlet's generated small-app interface. Add `index.html` only when a specialized interactive page is materially better. It should read relative files from `outputs/` and work when opened by Runlet.
 8. Run the Script with `run_script`, inspect its declared results and output files, and fix failures before reporting completion.
 
-Script code is JavaScript-only. It receives `{ workspace, run, input }`, where `input` contains values from declared controls. Use the provided `workspace` and `run` APIs. Do not use Node.js filesystem APIs, child processes, shell commands, native binaries, dependency installation, secrets, or paths outside the workspace.
+Script code is JavaScript-only. It receives `{ workspace, run, input, pdf, csv, zip }`, where `input` contains values from declared controls. Use the provided file APIs plus Runlet's bundled PDF, CSV, and ZIP helpers. Binary files use `workspace.readBytes` and `workspace.writeBytes`. Do not use Node.js filesystem APIs, child processes, shell commands, native binaries, dependency installation, secrets, or paths outside the workspace.
 
 ## Creating a Prompt
 

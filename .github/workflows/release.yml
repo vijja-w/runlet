@@ -20,11 +20,11 @@ jobs:
       - name: Set up build Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
 
       - name: Install production dependencies
-        run: npm ci --omit=dev --ignore-scripts
+        run: npm ci --omit=dev --omit=optional --ignore-scripts
 
       - name: Run tests
         run: npm run check
