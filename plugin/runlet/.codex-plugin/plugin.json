@@ -1,0 +1,25 @@
+{
+  "name": "runlet",
+  "version": "0.3.0",
+  "description": "Manage local workspaces, runnable Scripts, and reusable AI Prompts.",
+  "author": {
+    "name": "Local developer"
+  },
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Runlet",
+    "shortDescription": "Manage workspaces, small-app Scripts, and Prompts.",
+    "longDescription": "Runlet gives Codex a safe, provider-neutral interface for registered local workspaces, interactive local JavaScript Scripts, and reusable AI Prompts.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "List my Runlet workspaces.",
+      "Create a small-app Script in my selected Runlet workspace.",
+      "Use a saved Runlet Prompt with my attached files."
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #28231f66;
+  backdrop-filter: blur(3px);
+}
+
+.connect-modal {
+  position: relative;
+  width: min(500px, 100%);
+  padding: 30px;
+  border: 1px solid #e0d9d0;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 25px 80px #20191433;
+}
+
+.modal-close {
+  position: absolute;
+  right: 18px;
+  top: 14px;
+  border: 0;
+  background: transparent;
+  color: #8b847d;
+  font-size: 24px;
+}
+
+.modal-spark { margin-bottom: 18px; }
+.connect-modal h2 { margin: 0; font-family: Georgia, serif; font-size: 28px; font-weight: 500; letter-spacing: -.025em; }
+.modal-lead { margin: 9px 0 23px; color: #716a63; font-size: 13px; line-height: 1.55; }
+.connect-steps { display: grid; gap: 17px; margin: 0; padding: 0; list-style: none; }
+.connect-steps li { display: grid; grid-template-columns: 25px 1fr; gap: 11px; }
+.connect-steps li > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #f0ece6; color: #686159; font-size: 11px; font-weight: 750; }
+.connect-steps b { display: block; margin: 3px 0 7px; font-size: 13px; }
+.connect-steps code { display: block; overflow: auto; padding: 10px; border-radius: 8px; background: #292521; color: #f6f1ea; font-size: 10px; white-space: nowrap; }
+.connect-steps p { margin: 0; color: #6f6962; font-size: 12px; }
+.tip { margin: 22px 0 16px; padding: 13px 14px; border-radius: 10px; background: #fff7dd; color: #665b35; }
+.tip b { font-size: 11px; }
+.tip p { margin: 4px 0 0; font-size: 11px; line-height: 1.45; }

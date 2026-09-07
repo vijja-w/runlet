@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "runlet": {
+      "command": "runlet",
+      "args": [
+        "mcp"
+      ],
+      "enabled": true,
+      "startup_timeout_sec": 20
+    }
+  }
+}
