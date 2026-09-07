@@ -7,8 +7,30 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const codexMarketplace = path.join(appRoot, 'distribution', 'codex');
-const claudeMarketplace = path.join(appRoot, 'distribution', 'claude');
+const connectionRoot = path.join(
+  process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet'),
+  'connections',
+);
+
+async function prepareMarketplace(provider) {
+  const source = path.join(appRoot, 'distribution', provider);
+  const destination = path.join(connectionRoot, provider);
+  const pluginDirectory = path.join(destination, 'plugins', 'runlet');
+  await fs.rm(destination, { recursive: true, force: true });
+  await fs.mkdir(connectionRoot, { recursive: true });
+  await fs.cp(source, destination, { recursive: true });
+  const mcp = {
+    mcpServers: {
+      runlet: {
+        command: process.execPath,
+        args: [path.join(appRoot, 'bin', 'runlet.mjs'), 'mcp'],
+        ...(provider === 'codex' ? { enabled: true, startup_timeout_sec: 20 } : {}),
+      },
+    },
+  };
+  await fs.writeFile(path.join(pluginDirectory, '.mcp.json'), `${JSON.stringify(mcp, null, 2)}\n`);
+  return destination;
+}
 
 async function run(command, args, options = {}) {
   return execFileAsync(command, args, { timeout: 25_000, maxBuffer: 4 * 1024 * 1024, ...options });
@@ -86,6 +108,7 @@ export async function connect(provider) {
     const command = await findExecutable('codex');
     if (!command) throw new Error('Codex is not installed on this computer.');
     if ((await codexStatus()).connected) return codexStatus();
+    const codexMarketplace = await prepareMarketplace('codex');
     const marketplaces = await output(command, ['plugin', 'marketplace', 'list']);
     if (!marketplaces.includes(codexMarketplace) && !/Marketplace `runlet`/i.test(marketplaces)) {
       await run(command, ['plugin', 'marketplace', 'add', codexMarketplace]);
@@ -97,6 +120,7 @@ export async function connect(provider) {
     const command = await findExecutable('claude');
     if (!command) throw new Error('Claude Code is not installed on this computer.');
     if ((await claudeStatus()).connected) return claudeStatus();
+    const claudeMarketplace = await prepareMarketplace('claude');
     const marketplaces = await output(command, ['plugin', 'marketplace', 'list', '--json']);
     if (!marketplaces.includes(claudeMarketplace) && !/runlet-local/i.test(marketplaces)) {
       await run(command, ['plugin', 'marketplace', 'add', claudeMarketplace, '--scope', 'user']);

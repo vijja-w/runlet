@@ -1,6 +1,6 @@
 {
   "name": "runlet",
-  "version": "0.3.0",
+  "version": "0.1.0",
   "description": "Use Runlet workspaces, Scripts, and Prompts from Claude Code.",
   "author": {
     "name": "Runlet"

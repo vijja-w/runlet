@@ -4,11 +4,14 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const runtimeDir = path.join(appRoot, '.runlet');
+const runtimeDir = process.env.RUNLET_STATE_DIR
+  ? path.resolve(process.env.RUNLET_STATE_DIR)
+  : path.join(appRoot, '.runlet');
 const servicePath = path.join(runtimeDir, 'service.json');
 const logPath = path.join(runtimeDir, 'runlet.log');
 const serverPath = path.join(appRoot, 'src', 'server.mjs');
@@ -94,14 +97,61 @@ async function kill() {
   console.log('Runlet stopped.');
 }
 
+function isSafeInstallPath(target) {
+  if (!target) return false;
+  const resolved = path.resolve(target);
+  const root = path.parse(resolved).root;
+  return resolved !== root && resolved !== path.resolve(os.homedir()) && resolved.length > root.length + 3;
+}
+
+async function uninstall() {
+  const installRoot = process.env.RUNLET_INSTALL_ROOT;
+  const commandPath = process.env.RUNLET_BIN_PATH;
+  if (!installRoot) {
+    throw new Error('This copy is running from a development checkout. Remove it with npm unlink instead.');
+  }
+  if (!isSafeInstallPath(installRoot)) throw new Error(`Refusing to remove unsafe install path: ${installRoot}`);
+
+  await kill();
+
+  if (process.platform === 'win32') {
+    const cleanupPath = path.join(os.tmpdir(), `runlet-uninstall-${process.pid}.ps1`);
+    const script = [
+      '$ErrorActionPreference = "SilentlyContinue"',
+      'Start-Sleep -Milliseconds 800',
+      `Remove-Item -LiteralPath '${installRoot.replaceAll("'", "''")}' -Recurse -Force`,
+      `$runletPath = '${installRoot.replaceAll("'", "''")}'`,
+      '$userPath = [Environment]::GetEnvironmentVariable("Path", "User")',
+      '$parts = @($userPath -split ";" | Where-Object { $_ -and $_.TrimEnd("\\") -ine $runletPath.TrimEnd("\\") })',
+      '[Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")',
+      'Remove-Item -LiteralPath $PSCommandPath -Force',
+    ].join('\r\n');
+    await fs.writeFile(cleanupPath, script);
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', cleanupPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    console.log('Runlet is being uninstalled. Open a new PowerShell window to refresh PATH.');
+    console.log(`Workspace folders and settings in ${runtimeDir} were not deleted.`);
+    return;
+  }
+
+  if (commandPath) await fs.rm(commandPath, { force: true });
+  console.log('Runlet uninstalled.');
+  console.log(`Workspace folders and settings in ${runtimeDir} were not deleted.`);
+  await fs.rm(installRoot, { recursive: true, force: true });
+}
+
 const command = process.argv[2] || 'start';
 try {
   if (command === 'mcp') await import('../src/mcp-server.mjs');
   else if (command === 'start' || command === 'open') await start({ open: true });
   else if (command === 'status') await status();
   else if (command === 'kill' || command === 'stop') await kill();
+  else if (command === 'uninstall') await uninstall();
   else if (command === 'help' || command === '--help' || command === '-h') {
-    console.log('Runlet\n\n  runlet          Start Runlet or open it if already running\n  runlet status   Check whether Runlet is running\n  runlet kill     Stop Runlet\n  runlet open     Start or open Runlet');
+    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
   } else {
     console.error(`Unknown command: ${command}\nRun “runlet help” for available commands.`);
     process.exitCode = 1;

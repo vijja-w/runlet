@@ -2,16 +2,23 @@
 
 Runlet is a small local workspace manager. It keeps ordinary files, local Scripts, and reusable AI Prompts together without exposing technical details in the normal interface.
 
-## Install
+## Installation
 
-Install Node.js 22 or newer, then run:
+Runlet is currently distributed as a self-contained command-line app. You do not need Node.js, npm, Python, or Git.
+
+macOS or Linux:
 
 ```bash
-npm install
-npm link
+curl -fsSL https://raw.githubusercontent.com/vijja-w/runlet/main/install.sh | sh
 ```
 
-Start Runlet:
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/vijja-w/runlet/main/install.ps1 | iex
+```
+
+Then start Runlet:
 
 ```bash
 runlet
@@ -28,6 +35,36 @@ runlet open
 ```
 
 Running `runlet` again opens the existing Runlet service instead of starting another copy.
+
+Uninstall the app with:
+
+```bash
+runlet uninstall
+```
+
+Uninstalling keeps your workspace folders and Runlet settings. On Windows, open a new PowerShell window afterward so it picks up the updated PATH.
+
+To install manually, download the matching archive and `SHA256SUMS` from [GitHub Releases](https://github.com/vijja-w/runlet/releases/latest):
+
+- `runlet-darwin-arm64.tar.gz` — macOS Apple Silicon
+- `runlet-darwin-x64.tar.gz` — macOS Intel
+- `runlet-linux-x64.tar.gz` — Linux x64
+- `runlet-windows-x64.zip` — Windows x64
+
+Verify the archive, extract it, and place its `runlet` folder somewhere permanent. The automatic installers use `~/.local/share/runlet` on macOS/Linux and `%LOCALAPPDATA%\Programs\Runlet` on Windows.
+
+This is Runlet’s pre-desktop-app distribution method. A future desktop wrapper can use the same local runtime.
+
+## Local development
+
+Development requires Node.js 22 or newer:
+
+```bash
+npm install
+npm start
+```
+
+To make the `runlet` command use your development checkout, run `npm link`.
 
 ## Use with Codex
 
@@ -58,7 +95,7 @@ Runlet does not manage AI accounts or API keys. Each AI app starts Runlet's loca
 
 A workspace is an ordinary folder you explicitly add to Runlet. Removing its registration never deletes the folder.
 
-Runlet stores its local registry under `.runlet/`. Existing registrations from the earlier `.workshop/` location are read automatically.
+Installed copies keep their local registry under the user data directory (`~/.local/state/runlet` on macOS/Linux and `%LOCALAPPDATA%\Runlet\state` on Windows). Development checkouts use `.runlet/`. Existing registrations from the earlier `.workshop/` location are read automatically.
 
 Each workspace can contain ordinary files, Scripts, and Prompts:
 
