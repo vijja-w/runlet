@@ -4,6 +4,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as workshop from './workspaces.mjs';
+import * as connections from './connections.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const app = express();
@@ -33,6 +34,9 @@ app.get('/api/state', route(async () => {
   return { ...state, selected, scripts, prompts, files, defaultFolder: path.join(os.homedir(), 'Runlet Workspaces') };
 }));
 app.get('/api/health', (_request, response) => response.json({ ok: true, name: 'runlet', pid: process.pid, instanceToken }));
+app.get('/api/connections', route(async () => connections.listConnections()));
+app.post('/api/connections/:provider', route(async ({ params }) => connections.connect(params.provider)));
+app.delete('/api/connections/:provider', route(async ({ params }) => connections.disconnect(params.provider)));
 app.post('/api/workspaces', route(async ({ body }) => workshop.createWorkspace(body)));
 app.post('/api/workspaces/:id/select', route(async ({ params }) => workshop.selectWorkspace(params.id)));
 app.patch('/api/workspaces/:id', route(async ({ params, body }) => workshop.updateWorkspace(params.id, body)));

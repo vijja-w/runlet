@@ -1,0 +1,10 @@
+{
+  "name": "runlet",
+  "version": "0.3.0",
+  "description": "Use Runlet workspaces, Scripts, and Prompts from Claude Code.",
+  "author": {
+    "name": "Runlet"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

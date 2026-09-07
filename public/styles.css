@@ -185,6 +185,28 @@ nav em {
 .empty p { max-width: 520px; margin: auto; color: var(--muted); line-height: 1.6; }
 .empty.compact { padding: 34px; }
 
+.connection-list { display: grid; gap: 10px; }
+.connection-card {
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.connection-copy { min-width: 0; }
+.connection-heading { display: flex; align-items: center; gap: 10px; }
+.connection-heading h2 { margin: 0; font-size: 16px; }
+.connection-status { padding: 3px 7px; border-radius: 20px; color: var(--muted); background: var(--soft); font-size: 10px; font-weight: 700; }
+.connection-status.connected { color: var(--accent); background: var(--accent-soft); }
+.connection-card p { margin: 7px 0 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.invocation { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.invocation code { padding: 4px 7px; border-radius: 5px; color: var(--ink); background: var(--soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.connection-action { min-width: 104px; flex: 0 0 auto; }
+.connection-action:disabled { cursor: default; opacity: .48; }
+
 .muted { color: var(--muted); font-size: 13px; }
 
 .script-app { max-width: 1100px; margin: 0 auto; padding: 32px clamp(24px, 5vw, 64px) 64px; }
@@ -386,7 +408,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
   .sidebar { position: static; width: 100%; height: auto; padding: 14px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { padding: 0; }
   .workspace-switch { grid-column: 2; grid-row: 1; }
-  nav { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); }
+  nav { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); }
   .topbar { min-height: 0; padding: 22px 18px; align-items: flex-start; flex-direction: column; }
   .page, .prompt-page, .script-app { padding: 20px 16px 50px; }
   .run-footer { align-items: stretch; flex-direction: column; }
@@ -397,4 +419,6 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px v
   .file-row small { display: none; }
   .editor-actions { align-items: stretch; flex-direction: column; }
   .welcome-actions { flex-direction: column; }
+  .connection-card { align-items: stretch; flex-direction: column; }
+  .connection-action { width: 100%; }
 }

@@ -1,0 +1,20 @@
+{
+  "name": "runlet",
+  "interface": {
+    "displayName": "Runlet"
+  },
+  "plugins": [
+    {
+      "name": "runlet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/runlet"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

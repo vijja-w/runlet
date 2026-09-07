@@ -1,5 +1,5 @@
 const app = document.querySelector('#app');
-let state = { workspaces: [], scripts: [], prompts: [], files: [], selected: null };
+let state = { workspaces: [], scripts: [], prompts: [], files: [], selected: null, connections: [] };
 let view = 'scripts';
 let selectedScript = null;
 let selectedPrompt = null;
@@ -7,6 +7,7 @@ let scriptResults = [];
 let scriptInputValues = {};
 let filePath = '.';
 let selectedWorkspaceId = null;
+let connectionsLoading = false;
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const icons = {
@@ -23,7 +24,8 @@ const api = async (url, options = {}) => {
 };
 
 async function refresh() {
-  state = await api('/api/state');
+  const connections = state.connections || [];
+  state = { ...await api('/api/state'), connections };
   if (selectedWorkspaceId !== state.selected?.id) {
     selectedWorkspaceId = state.selected?.id || null;
     filePath = '.';
@@ -40,7 +42,7 @@ function render() {
   if (!state.selected) return renderWelcome();
   const content = selectedScript ? scriptDetail(selectedScript)
     : selectedPrompt ? promptDetail(selectedPrompt)
-      : view === 'files' ? filesView() : view === 'prompts' ? promptsView() : scriptsView();
+      : view === 'files' ? filesView() : view === 'prompts' ? promptsView() : view === 'connections' ? connectionsView() : scriptsView();
   app.innerHTML = `<main class="shell">
     <aside class="sidebar">
       <div class="brand"><span>R</span><b>Runlet</b></div>
@@ -52,6 +54,7 @@ function render() {
         <button data-view="scripts" class="${view === 'scripts' ? 'active' : ''}">Scripts <em>${state.scripts.length}</em></button>
         <button data-view="prompts" class="${view === 'prompts' ? 'active' : ''}">Prompts <em>${state.prompts.length}</em></button>
         <button data-view="files" class="${view === 'files' ? 'active' : ''}">Files <em>${state.files.length}</em></button>
+        <button data-view="connections" class="${view === 'connections' ? 'active' : ''}">Connections</button>
       </nav>
     </aside>
     <section class="main">${content}</section>
@@ -165,6 +168,20 @@ function filesView() {
   </div>`;
 }
 
+function connectionsView() {
+  const cards = connectionsLoading
+    ? '<div class="empty compact"><p>Checking your local AI apps…</p></div>'
+    : (state.connections || []).map((connection) => `<article class="connection-card">
+        <div class="connection-copy">
+          <div class="connection-heading"><h2>${escapeHtml(connection.name)}</h2><span class="connection-status ${connection.connected ? 'connected' : ''}">${escapeHtml(connection.status)}</span></div>
+          <p>${escapeHtml(connection.note || (connection.available ? 'Connect Runlet to this AI.' : `Install ${connection.name} to connect it.`))}</p>
+          <div class="invocation"><span>Use it with</span><code>${escapeHtml(connection.invocation)}</code></div>
+        </div>
+        <button class="${connection.connected ? 'secondary' : 'primary'} connection-action" data-connection="${connection.id}" data-connected="${connection.connected}" ${connection.available ? '' : 'disabled'}>${connection.connected ? 'Disconnect' : 'Connect'}</button>
+      </article>`).join('');
+  return `${topbar('Connections', 'Use Runlet from the AI apps installed on this computer.', iconButton('refresh', 'Refresh', 'id="refresh-connections"'))}<div class="page connection-list">${cards}</div>`;
+}
+
 function fileBreadcrumbs() {
   const parts = filePath === '.' ? [] : filePath.split('/').filter(Boolean);
   const crumbs = [`<button data-file-path=".">${escapeHtml(state.selected.name)}</button>`];
@@ -185,6 +202,7 @@ function bindEvents() {
     selectedScript = null;
     selectedPrompt = null;
     render();
+    if (view === 'connections') loadConnections();
   });
   document.querySelectorAll('[data-script]').forEach((card) => card.onclick = (event) => {
     if (event.target.closest('button,a')) return;
@@ -212,6 +230,8 @@ function bindEvents() {
   document.querySelector('#back')?.addEventListener('click', () => { selectedScript = null; selectedPrompt = null; scriptResults = []; scriptInputValues = {}; render(); });
   document.querySelector('#refresh')?.addEventListener('click', refresh);
   document.querySelector('#workspace-switch')?.addEventListener('click', workspaceSwitcher);
+  document.querySelector('#refresh-connections')?.addEventListener('click', loadConnections);
+  document.querySelectorAll('[data-connection]').forEach((button) => button.onclick = () => changeConnection(button));
   document.querySelector('#prompt-form')?.addEventListener('submit', savePrompt);
   document.querySelector('#script-run-form')?.addEventListener('submit', runScript);
   document.querySelectorAll('[data-meta-field]').forEach((element) => {
@@ -220,6 +240,31 @@ function bindEvents() {
     });
     element.addEventListener('blur', saveMetadata);
   });
+}
+
+async function loadConnections() {
+  connectionsLoading = true;
+  render();
+  try {
+    state.connections = await api('/api/connections');
+  } catch (error) { toast(error.message, true); }
+  connectionsLoading = false;
+  render();
+}
+
+async function changeConnection(button) {
+  const provider = button.dataset.connection;
+  const disconnecting = button.dataset.connected === 'true';
+  button.disabled = true;
+  button.textContent = disconnecting ? 'Disconnecting…' : 'Connecting…';
+  try {
+    const connection = await api(`/api/connections/${encodeURIComponent(provider)}`, { method: disconnecting ? 'DELETE' : 'POST' });
+    toast(connection.connected ? `${connection.name} connected.` : `${connection.name} disconnected.`);
+    await loadConnections();
+  } catch (error) {
+    toast(error.message, true);
+    await loadConnections();
+  }
 }
 
 async function openFolder(path) {
