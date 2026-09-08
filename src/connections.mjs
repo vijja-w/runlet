@@ -35,14 +35,8 @@ async function run(command, args, options = {}) {
   return execFileAsync(command, args, { timeout: 25_000, maxBuffer: 4 * 1024 * 1024, ...options });
 }
 
-async function findExecutable(name) {
-  const candidates = name === 'codex'
-    ? ['codex', '/Applications/ChatGPT.app/Contents/Resources/codex']
-    : [
-        'claude',
-        path.join(os.homedir(), '.local', 'bin', 'claude'),
-        path.join(os.homedir(), '.claude', 'local', 'claude'),
-      ];
+async function findCodexExecutable() {
+  const candidates = ['codex', '/Applications/ChatGPT.app/Contents/Resources/codex'];
   for (const candidate of candidates) {
     if (candidate.includes(path.sep) && !await fs.access(candidate).then(() => true).catch(() => false)) continue;
     try {
@@ -97,34 +91,18 @@ function codexInstallations(value) {
 }
 
 async function codexStatus() {
-  const command = await findExecutable('codex');
-  if (!command) return { id: 'codex', name: 'Codex', available: false, connected: false, status: 'Not installed', invocation: '@Runlet' };
+  const command = await findCodexExecutable();
+  if (!command) return { id: 'codex', name: 'ChatGPT', available: false, connected: false, status: 'Not installed', invocation: '@Runlet' };
   const listing = await output(command, ['plugin', 'list']);
   const installations = codexInstallations(listing);
   return {
     id: 'codex',
-    name: 'Codex',
+    name: 'ChatGPT',
     available: true,
     connected: installations.length > 0,
     status: installations.length ? 'Connected' : 'Ready to connect',
     invocation: '@Runlet',
-    note: installations.length ? 'Start a new Codex task after connecting or updating.' : 'Adds Runlet as a local Codex plugin.',
-  };
-}
-
-async function claudeStatus() {
-  const command = await findExecutable('claude');
-  if (!command) return { id: 'claude', name: 'Claude Code', available: false, connected: false, status: 'Not installed', invocation: '/runlet:use' };
-  const listing = await output(command, ['plugin', 'list', '--json']);
-  const connected = /runlet@runlet-local/i.test(listing);
-  return {
-    id: 'claude',
-    name: 'Claude Code',
-    available: true,
-    connected,
-    status: connected ? 'Connected' : 'Ready to connect',
-    invocation: '/runlet:use',
-    note: connected ? 'Restart Claude Code or run /reload-plugins after updating.' : 'Adds Runlet tools and the /runlet:use shortcut.',
+    note: installations.length ? 'Start a new task after connecting or updating.' : 'Adds Runlet as a local ChatGPT plugin.',
   };
 }
 
@@ -132,7 +110,7 @@ async function claudeDesktopStatus() {
   const application = await findClaudeDesktop();
   return {
     id: 'claude-desktop',
-    name: 'Claude Desktop',
+    name: 'Claude',
     available: Boolean(application),
     connected: false,
     status: application ? 'Ready to install' : 'Not installed',
@@ -141,7 +119,7 @@ async function claudeDesktopStatus() {
     actionLabel: 'Install',
     note: application
       ? 'Installs a local Runlet extension. Claude will ask you to approve it.'
-      : 'Install Claude Desktop to add the local Runlet extension.',
+      : 'Install Claude to add the local Runlet extension.',
   };
 }
 
@@ -197,13 +175,13 @@ async function openClaudeDesktopExtension(application) {
 }
 
 export async function listConnections() {
-  return Promise.all([codexStatus(), claudeDesktopStatus(), claudeStatus()]);
+  return Promise.all([codexStatus(), claudeDesktopStatus()]);
 }
 
 export async function connect(provider) {
   if (provider === 'codex') {
-    const command = await findExecutable('codex');
-    if (!command) throw new Error('Codex is not installed on this computer.');
+    const command = await findCodexExecutable();
+    if (!command) throw new Error('ChatGPT is not installed on this computer.');
     if ((await codexStatus()).connected) return codexStatus();
     const codexMarketplace = await prepareMarketplace('codex');
     const marketplaces = await output(command, ['plugin', 'marketplace', 'list']);
@@ -213,26 +191,14 @@ export async function connect(provider) {
     await run(command, ['plugin', 'add', 'runlet@runlet']);
     return codexStatus();
   }
-  if (provider === 'claude') {
-    const command = await findExecutable('claude');
-    if (!command) throw new Error('Claude Code is not installed on this computer.');
-    if ((await claudeStatus()).connected) return claudeStatus();
-    const claudeMarketplace = await prepareMarketplace('claude');
-    const marketplaces = await output(command, ['plugin', 'marketplace', 'list', '--json']);
-    if (!marketplaces.includes(claudeMarketplace) && !/runlet-local/i.test(marketplaces)) {
-      await run(command, ['plugin', 'marketplace', 'add', claudeMarketplace, '--scope', 'user']);
-    }
-    await run(command, ['plugin', 'install', 'runlet@runlet-local', '--scope', 'user', '--yes']);
-    return claudeStatus();
-  }
   if (provider === 'claude-desktop') {
     const application = await findClaudeDesktop();
-    if (!application) throw new Error('Claude Desktop is not installed on this computer.');
+    if (!application) throw new Error('Claude is not installed on this computer.');
     await openClaudeDesktopExtension(application);
     return {
       ...await claudeDesktopStatus(),
       status: 'Finish in Claude',
-      message: 'Claude Desktop opened the Runlet extension. Approve Install in Claude to finish.',
+      message: 'Claude opened the Runlet extension. Approve Install in Claude to finish.',
     };
   }
   throw new Error('Unsupported AI connection.');
@@ -240,17 +206,11 @@ export async function connect(provider) {
 
 export async function disconnect(provider) {
   if (provider === 'codex') {
-    const command = await findExecutable('codex');
-    if (!command) throw new Error('Codex is not installed on this computer.');
+    const command = await findCodexExecutable();
+    if (!command) throw new Error('ChatGPT is not installed on this computer.');
     const installations = codexInstallations(await output(command, ['plugin', 'list']));
     for (const installation of installations) await run(command, ['plugin', 'remove', installation]);
     return codexStatus();
-  }
-  if (provider === 'claude') {
-    const command = await findExecutable('claude');
-    if (!command) throw new Error('Claude Code is not installed on this computer.');
-    if ((await claudeStatus()).connected) await run(command, ['plugin', 'uninstall', 'runlet@runlet-local', '--scope', 'user']);
-    return claudeStatus();
   }
   throw new Error('Unsupported AI connection.');
 }

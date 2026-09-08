@@ -72,9 +72,9 @@ npm start
 
 To make the `runlet` command use your development checkout, run `npm link`.
 
-## Use with Codex
+## Use with ChatGPT
 
-The Runlet plugin supplies the local MCP connection. After installing it, start a new Codex task and ask:
+The Runlet plugin supplies the local MCP connection. After installing it, start a new task in ChatGPT and ask:
 
 ```text
 @Runlet list my workspaces.
@@ -92,9 +92,8 @@ Runlet uses a local stdio MCP server. It does not need to be published or expose
 
 Open **Connections** in Runlet to connect supported AI apps installed on the same computer.
 
-- Codex installs the bundled local Runlet plugin. Start a new task and use `@Runlet`.
-- Claude Desktop opens a small local extension installer. Approve it in Claude, then ask Claude to use Runlet.
-- Claude Code installs the bundled local Runlet plugin. Restart Claude Code or reload plugins, then use `/runlet:use`.
+- ChatGPT installs the bundled local Runlet plugin. Start a new task and use `@Runlet`.
+- Claude opens a small local extension installer. Approve it in Claude, then ask Claude to use Runlet.
 
 Runlet does not manage AI accounts or API keys. Each AI app starts Runlet's local MCP process when it needs the tools.
 
@@ -126,7 +125,7 @@ prompts/
 
 A Script is a small local app. Runlet uses `runlet.json` to generate its controls and result panels, so a person can choose values, select Run, and review the result without seeing code. A specialized Script may also provide its own `index.html`.
 
-Open always shows the Script’s Run page. After a specialized Script runs, its custom page opens in a separate browser tab while Runlet stays open.
+Open always shows the Script’s Run page. After a specialized Script runs, its custom page opens in a separate browser tab while Runlet stays open. Previous run reopens that page without running the Script again.
 
 Open a Script and use the trash button to permanently delete it together with its inputs and outputs.
 

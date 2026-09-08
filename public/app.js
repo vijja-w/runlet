@@ -116,7 +116,7 @@ function scriptDetail(script) {
     ? script.controls.map((control) => renderScriptControl(control)).join('')
     : '<p class="muted">This Script is ready to run.</p>';
   const resultPanels = scriptResults.filter((result) => !result.missing).map(renderResult).join('');
-  const topControls = `${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Open page</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
+  const topControls = `${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Previous run</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
   return `${topbar(script.name, script.description, topControls, 'script')}<div class="script-app">
     <form id="script-run-form" class="control-panel">
       <div class="control-grid">${controlFields}</div>
@@ -312,7 +312,7 @@ async function runScript(event) {
     await refresh();
     if (hasView) {
       if (viewWindow) viewWindow.location.replace(`/script-view/${state.selected.id}/${encodeURIComponent(slug)}`);
-      toast(viewWindow ? (response.logs?.at(-1) || 'Script finished. Its page opened in a new tab.') : 'Script finished. Use Open page to view it.');
+      toast(viewWindow ? (response.logs?.at(-1) || 'Script finished. Its page opened in a new tab.') : 'Script finished. Use Previous run to view it.');
     } else {
       await loadScriptResults();
       toast(response.logs?.at(-1) || 'Script finished.');

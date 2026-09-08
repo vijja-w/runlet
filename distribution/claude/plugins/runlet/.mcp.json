@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "runlet": {
-      "command": "runlet",
-      "args": ["mcp"]
-    }
-  }
-}
