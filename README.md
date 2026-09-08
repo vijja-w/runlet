@@ -123,6 +123,8 @@ prompts/
 
 A Script is a small local app. Runlet uses `runlet.json` to generate its controls and result panels, so a person can choose values, select Run, and review the result without seeing code. A specialized Script may also provide its own `index.html`.
 
+Open always shows the Script’s Run page. After a specialized Script runs, its custom page opens in a separate browser tab while Runlet stays open.
+
 Open a Script and use the trash button to permanently delete it together with its inputs and outputs.
 
 The JavaScript runs locally in an isolated worker, not in the browser page. It uses only Runlet's built-in APIs, so each Script does not need packages or a separate installation. Its `run.js` exports one default function:

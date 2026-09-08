@@ -163,7 +163,7 @@ test('builds a Claude Desktop extension for the installed Runlet server', async 
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
   assert.equal(manifest.manifest_version, '0.4');
   assert.equal(manifest.name, 'runlet-local');
-  assert.equal(manifest.version, '0.4.0');
+  assert.equal(manifest.version, '0.5.0');
   assert.equal(manifest.server.type, 'node');
   assert.equal(manifest.server.entry_point, 'server/index.mjs');
   assert.deepEqual(manifest.server.mcp_config.args, ['${__dirname}/server/index.mjs']);

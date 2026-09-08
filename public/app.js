@@ -94,9 +94,7 @@ function scriptsView() {
           <p>${escapeHtml(script.description)}</p>
         </div>
         <div class="card-actions">
-          ${script.hasView
-            ? `<a class="primary small" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}" target="_blank" rel="noopener">Open</a>`
-            : `<button class="primary small open-script" data-open-script="${escapeHtml(script.slug)}">Open</button>`}
+          <button class="primary small open-script" data-open-script="${escapeHtml(script.slug)}">Open</button>
         </div>
       </article>`).join('')
     : `<div class="empty"><h2>No Scripts yet</h2><p>Ask your AI: “@Runlet create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
@@ -118,7 +116,7 @@ function scriptDetail(script) {
     ? script.controls.map((control) => renderScriptControl(control)).join('')
     : '<p class="muted">This Script is ready to run.</p>';
   const resultPanels = scriptResults.filter((result) => !result.missing).map(renderResult).join('');
-  const topControls = `${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Open</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
+  const topControls = `${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Open page</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
   return `${topbar(script.name, script.description, topControls, 'script')}<div class="script-app">
     <form id="script-run-form" class="control-panel">
       <div class="control-grid">${controlFields}</div>
@@ -298,20 +296,29 @@ async function runScript(event) {
   const form = event.currentTarget;
   const button = form.querySelector('[data-run-script]');
   const slug = button.dataset.runScript;
+  const hasView = selectedScript?.slug === slug && selectedScript.hasView;
+  const viewWindow = hasView ? window.open('about:blank', '_blank') : null;
+  if (viewWindow) {
+    viewWindow.opener = null;
+    viewWindow.document.title = `${selectedScript.name} — Running`;
+    viewWindow.document.body.innerHTML = '<p style="font: 15px system-ui; padding: 24px; color: #555">Running Script…</p>';
+  }
   scriptInputValues = Object.fromEntries(new FormData(form));
   const old = button.textContent;
   button.disabled = true;
   button.textContent = 'Running…';
   try {
     const response = await api(`/api/scripts/${encodeURIComponent(slug)}/run`, { method:'POST', body: JSON.stringify({ workspaceId: state.selected.id, input: scriptInputValues }) });
-    if (selectedScript?.slug === slug && selectedScript.hasView) {
-      window.location.assign(`/script-view/${state.selected.id}/${encodeURIComponent(slug)}`);
-      return;
-    }
     await refresh();
-    await loadScriptResults();
-    toast(response.logs?.at(-1) || 'Script finished.');
+    if (hasView) {
+      if (viewWindow) viewWindow.location.replace(`/script-view/${state.selected.id}/${encodeURIComponent(slug)}`);
+      toast(viewWindow ? (response.logs?.at(-1) || 'Script finished. Its page opened in a new tab.') : 'Script finished. Use Open page to view it.');
+    } else {
+      await loadScriptResults();
+      toast(response.logs?.at(-1) || 'Script finished.');
+    }
   } catch (error) {
+    if (viewWindow) viewWindow.close();
     toast(error.message, true);
     button.disabled = false;
     button.textContent = old;
