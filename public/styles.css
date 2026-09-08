@@ -205,8 +205,6 @@ nav em {
 .connection-status { padding: 3px 7px; border-radius: 20px; color: var(--muted); background: var(--soft); font-size: 10px; font-weight: 700; }
 .connection-status.connected { color: var(--accent); background: var(--accent-soft); }
 .connection-card p { margin: 7px 0 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
-.invocation { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
-.invocation code { padding: 4px 7px; border-radius: 5px; color: var(--ink); background: var(--soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .connection-action { min-width: 104px; flex: 0 0 auto; }
 .connection-action:disabled { cursor: default; opacity: .48; }
 

@@ -205,7 +205,7 @@ Return one `invoices.csv` file with those exact column names.
 Ask an MCP-capable AI:
 
 ```text
-@Runlet use the “Extract Invoice” Prompt with the attached PDFs.
+Ask Runlet to use the “Extract Invoice” Prompt with the attached PDFs.
 ```
 
 Runlet returns the saved Prompt. The AI follows it using the files in the conversation or workspace.

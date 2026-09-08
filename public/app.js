@@ -97,7 +97,7 @@ function scriptsView() {
           <button class="primary small open-script" data-open-script="${escapeHtml(script.slug)}">Open</button>
         </div>
       </article>`).join('')
-    : `<div class="empty"><h2>No Scripts yet</h2><p>Ask your AI: “Ask Runlet to create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
+    : `<div class="empty"><h2>No Scripts yet</h2><p>Try asking: “Ask Runlet to create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
   return `${topbar('Scripts', 'Small programs that run locally.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${cards}</div>`;
 }
 
@@ -107,7 +107,7 @@ function promptsView() {
         <div class="action-copy"><h2>${escapeHtml(prompt.name)}</h2><p>${escapeHtml(prompt.description)}</p></div>
         <button class="secondary small copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy</button>
       </article>`).join('')
-    : `<div class="empty"><h2>No Prompts yet</h2><p>Ask your AI: “Ask Runlet to create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
+    : `<div class="empty"><h2>No Prompts yet</h2><p>Try asking: “Ask Runlet to create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
   return `${topbar('Prompts', 'Saved instructions for your AI.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${cards}</div>`;
 }
 
@@ -151,7 +151,7 @@ function promptDetail(prompt) {
     <form id="prompt-form" class="prompt-editor">
       <label for="prompt-content">Prompt</label>
       <textarea id="prompt-content" name="content" spellcheck="true">${escapeHtml(prompt.content)}</textarea>
-      <div class="editor-actions"><span>Ask your AI: Ask Runlet to use the “${escapeHtml(prompt.name)}” Prompt.</span><button class="primary" type="submit">Save</button></div>
+      <div class="editor-actions"><span>Try asking: “Ask Runlet to use the ${escapeHtml(prompt.name)} Prompt.”</span><button class="primary" type="submit">Save</button></div>
     </form>
   </div>`;
 }
@@ -173,7 +173,6 @@ function connectionsView() {
         <div class="connection-copy">
           <div class="connection-heading"><h2>${escapeHtml(connection.name)}</h2><span class="connection-status ${connection.connected ? 'connected' : ''}">${escapeHtml(connection.status)}</span></div>
           <p>${escapeHtml(connection.note || (connection.available ? 'Connect Runlet to this AI.' : `Install ${connection.name} to connect it.`))}</p>
-          <div class="invocation"><span>Use it with</span><code>${escapeHtml(connection.invocation)}</code></div>
         </div>
         <button class="${connection.connected ? 'secondary' : 'primary'} connection-action" data-connection="${connection.id}" data-connected="${connection.connected}" data-action="${escapeHtml(connection.action || (connection.connected ? 'disconnect' : 'connect'))}" ${connection.available ? '' : 'disabled'}>${escapeHtml(connection.actionLabel || (connection.connected ? 'Disconnect' : 'Connect'))}</button>
       </article>`).join('');

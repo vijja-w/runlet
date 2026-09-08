@@ -115,7 +115,7 @@ function codexInstallations(value) {
 
 async function codexStatus() {
   const command = await findCodexExecutable();
-  if (!command) return { id: 'codex', name: 'ChatGPT', available: false, connected: false, status: 'Not installed', invocation: 'Ask Runlet to…' };
+  if (!command) return { id: 'codex', name: 'ChatGPT', available: false, connected: false, status: 'Not installed' };
   const listing = await output(command, ['plugin', 'list']);
   const installations = codexInstallations(listing);
   return {
@@ -124,8 +124,7 @@ async function codexStatus() {
     available: true,
     connected: installations.length > 0,
     status: installations.length ? 'Connected' : 'Ready to connect',
-    invocation: 'Ask Runlet to…',
-    note: installations.length ? 'Start a new task after connecting or updating.' : 'Adds Runlet as a local ChatGPT plugin.',
+    note: installations.length ? 'Runlet is installed as a local ChatGPT plugin.' : 'Installs Runlet as a local ChatGPT plugin.',
   };
 }
 
@@ -138,7 +137,6 @@ export async function claudeDesktopStatus() {
     available: Boolean(application || installation),
     connected,
     status: connected ? 'Connected' : application ? 'Ready to install' : 'Not installed',
-    invocation: 'Ask Runlet to…',
     action: 'install',
     actionLabel: connected ? 'Reinstall' : 'Install',
     note: connected
