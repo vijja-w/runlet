@@ -287,15 +287,20 @@ function bindListControls(kind) {
   const list = document.querySelector(`[data-order-list="${plural}"]`);
   if (!list) return;
   let draggedCard = null;
-  let dropped = false;
+  let moved = false;
   list.querySelectorAll('[data-drag-kind]').forEach((handle) => {
     const card = handle.closest('[data-order-item]');
     handle.addEventListener('click', (event) => event.stopPropagation());
-    handle.addEventListener('pointerdown', () => { card.draggable = true; });
-    handle.addEventListener('pointerup', () => { card.draggable = false; });
+    handle.addEventListener('pointerdown', () => {
+      if (!list.classList.contains('searching')) card.draggable = true;
+    });
     card.addEventListener('dragstart', (event) => {
+      if (list.classList.contains('searching')) {
+        event.preventDefault();
+        return;
+      }
       draggedCard = card;
-      dropped = false;
+      moved = false;
       event.dataTransfer.setDragImage(card, Math.max(20, card.offsetWidth - 22), 28);
       draggedCard.classList.add('dragging');
       event.dataTransfer.effectAllowed = 'move';
@@ -304,7 +309,7 @@ function bindListControls(kind) {
     card.addEventListener('dragend', () => {
       card.draggable = false;
       draggedCard?.classList.remove('dragging');
-      if (!dropped) render();
+      if (moved) void saveListOrder(plural, list);
       draggedCard = null;
     });
   });
@@ -317,13 +322,12 @@ function bindListControls(kind) {
       const reference = after ? card.nextSibling : card;
       if (reference === draggedCard || draggedCard.nextSibling === reference) return;
       animateCardMove(list, draggedCard, reference);
+      moved = true;
     });
   });
-  list.addEventListener('drop', async (event) => {
+  list.addEventListener('drop', (event) => {
     if (!draggedCard) return;
     event.preventDefault();
-    dropped = true;
-    await saveListOrder(plural, list);
   });
 }
 
@@ -341,8 +345,10 @@ function animateCardMove(list, draggedCard, reference) {
 
 function applyListFilter(kind, query) {
   const normalized = String(query || '').trim().toLowerCase();
+  const list = document.querySelector(`[data-order-list="${kind}s"]`);
+  list?.classList.toggle('searching', Boolean(normalized));
   let matches = 0;
-  document.querySelectorAll(`[data-order-list="${kind}s"] [data-order-item]`).forEach((card) => {
+  list?.querySelectorAll('[data-order-item]').forEach((card) => {
     card.hidden = normalized && !card.dataset.searchText.includes(normalized);
     if (!card.hidden) matches += 1;
   });
