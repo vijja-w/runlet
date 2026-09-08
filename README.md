@@ -20,6 +20,8 @@ irm https://raw.githubusercontent.com/vijja-w/runlet/main/install.ps1 | iex
 
 Run the same one-line command again whenever you want to update Runlet to the latest release. Your workspace folders and registrations are kept.
 
+After installing, `runlet update` checks GitHub for the latest published release. It reports when Runlet is current and installs the exact new version when an update is available.
+
 Then start Runlet:
 
 ```bash
@@ -33,6 +35,7 @@ Useful commands:
 ```bash
 runlet status
 runlet version
+runlet update
 runlet kill
 runlet open
 ```

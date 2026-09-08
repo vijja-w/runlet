@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $Repository = 'vijja-w/runlet'
 $InstallRoot = if ($env:RUNLET_INSTALL_DIR) { $env:RUNLET_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\Runlet' }
 $Asset = 'runlet-windows-x64.zip'
-$ReleaseUrl = "https://github.com/$Repository/releases/latest/download"
+$ReleaseUrl = if ($env:RUNLET_VERSION) { "https://github.com/$Repository/releases/download/v$($env:RUNLET_VERSION)" } else { "https://github.com/$Repository/releases/latest/download" }
 
 try {
     if (-not [Environment]::Is64BitOperatingSystem) {
@@ -35,6 +35,7 @@ try {
         $ExtractedRoot = Join-Path $TempRoot 'runlet'
         if (-not (Test-Path -LiteralPath (Join-Path $ExtractedRoot 'runlet.cmd'))) { throw 'The release archive does not contain the Runlet launcher.' }
         if (-not (Test-Path -LiteralPath (Join-Path $ExtractedRoot 'runtime\node.exe'))) { throw 'The release archive does not contain its runtime.' }
+        $InstalledVersion = (Get-Content -LiteralPath (Join-Path $ExtractedRoot 'package.json') -Raw | ConvertFrom-Json).version
 
         if (Test-Path -LiteralPath (Join-Path $InstallRoot 'runlet.cmd')) {
             & (Join-Path $InstallRoot 'runlet.cmd') kill 2>$null | Out-Null
@@ -54,7 +55,7 @@ try {
         }
 
         Write-Host ''
-        Write-Host 'Runlet installed successfully.'
+        Write-Host "Runlet $InstalledVersion installed successfully."
         Write-Host 'Run: runlet'
         Write-Host 'Uninstall later with: runlet uninstall'
     }

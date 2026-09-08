@@ -144,8 +144,98 @@ async function uninstall() {
 }
 
 async function version() {
+  console.log(await currentVersion());
+}
+
+async function currentVersion() {
   const metadata = JSON.parse(await fs.readFile(path.join(appRoot, 'package.json'), 'utf8'));
-  console.log(metadata.version);
+  return metadata.version;
+}
+
+function compareVersions(left, right) {
+  const leftParts = left.split(/[.-]/).slice(0, 3).map(Number);
+  const rightParts = right.split(/[.-]/).slice(0, 3).map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] > rightParts[index] ? 1 : -1;
+  }
+  return 0;
+}
+
+async function downloadText(target, label) {
+  const response = await fetch(target, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'Runlet updater' },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`Could not download ${label} (${response.status}).`);
+  return response.text();
+}
+
+function waitForExit(child) {
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => code === 0 ? resolve() : reject(new Error(`Installer failed${signal ? ` with ${signal}` : ` with exit code ${code}`}.`)));
+  });
+}
+
+async function scheduleWindowsUpdate(installer, installRoot, releaseVersion) {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'runlet-update-'));
+  const installerPath = path.join(temporaryRoot, 'install.ps1');
+  const updaterPath = path.join(temporaryRoot, 'update.ps1');
+  const escapePowerShell = (value) => String(value).replaceAll("'", "''");
+  await fs.writeFile(installerPath, installer);
+  await fs.writeFile(updaterPath, [
+    '$ErrorActionPreference = \'Stop\'',
+    'Start-Sleep -Milliseconds 900',
+    `$env:RUNLET_INSTALL_DIR = '${escapePowerShell(installRoot)}'`,
+    `$env:RUNLET_VERSION = '${escapePowerShell(releaseVersion)}'`,
+    `& powershell.exe -NoProfile -ExecutionPolicy Bypass -File '${escapePowerShell(installerPath)}'`,
+    `Remove-Item -LiteralPath '${escapePowerShell(temporaryRoot)}' -Recurse -Force`,
+  ].join('\r\n'));
+  const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', updaterPath], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+  console.log(`Runlet ${releaseVersion} will finish installing in the background.`);
+  console.log('Open a new PowerShell window in a moment, then run: runlet version');
+}
+
+async function update() {
+  const installRoot = process.env.RUNLET_INSTALL_ROOT;
+  if (!installRoot) throw new Error('This copy is running from a development checkout and cannot update itself.');
+  const installed = await currentVersion();
+  console.log(`Installed version: ${installed}`);
+  console.log('Checking for updates…');
+  const release = JSON.parse(await downloadText('https://api.github.com/repos/vijja-w/runlet/releases/latest', 'the latest release information'));
+  const tag = String(release.tag_name || '');
+  if (!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) throw new Error('GitHub returned an invalid Runlet release version.');
+  const available = tag.slice(1);
+  if (compareVersions(installed, available) >= 0) {
+    console.log(`Runlet ${installed} is up to date.`);
+    return;
+  }
+
+  console.log(`Updating Runlet ${installed} → ${available}…`);
+  const installerName = process.platform === 'win32' ? 'install.ps1' : 'install.sh';
+  const installer = await downloadText(`https://raw.githubusercontent.com/vijja-w/runlet/${tag}/${installerName}`, 'the Runlet installer');
+  if (process.platform === 'win32') {
+    await scheduleWindowsUpdate(installer, installRoot, available);
+    return;
+  }
+
+  const child = spawn('sh', [], {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    env: {
+      ...process.env,
+      RUNLET_INSTALL_DIR: installRoot,
+      RUNLET_BIN_DIR: process.env.RUNLET_BIN_PATH && path.resolve(path.dirname(process.env.RUNLET_BIN_PATH)) !== path.resolve(installRoot)
+        ? path.dirname(process.env.RUNLET_BIN_PATH)
+        : path.join(os.homedir(), '.local', 'bin'),
+      RUNLET_VERSION: available,
+    },
+  });
+  child.stdin.end(installer);
+  await waitForExit(child);
 }
 
 const command = process.argv[2] || 'start';
@@ -155,9 +245,10 @@ try {
   else if (command === 'status') await status();
   else if (command === 'kill' || command === 'stop') await kill();
   else if (command === 'uninstall') await uninstall();
+  else if (command === 'update') await update();
   else if (command === 'version' || command === '--version' || command === '-v') await version();
   else if (command === 'help' || command === '--help' || command === '-h') {
-    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet version   Show the installed version\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
+    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet version   Show the installed version\n  runlet update    Check for and install the latest release\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
   } else {
     console.error(`Unknown command: ${command}\nRun “runlet help” for available commands.`);
     process.exitCode = 1;

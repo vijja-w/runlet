@@ -33,7 +33,11 @@ if [ -e "$BIN_DIR/runlet" ] && [ ! -L "$BIN_DIR/runlet" ]; then
 fi
 
 asset="runlet-${platform}-${architecture}.tar.gz"
-release_url="https://github.com/${REPOSITORY}/releases/latest/download"
+case "${RUNLET_VERSION:-}" in
+  '') release_url="https://github.com/${REPOSITORY}/releases/latest/download" ;;
+  *[!0-9A-Za-z.+-]*) fail 'RUNLET_VERSION contains invalid characters.' ;;
+  *) release_url="https://github.com/${REPOSITORY}/releases/download/v${RUNLET_VERSION}" ;;
+esac
 temporary_dir=$(mktemp -d 2>/dev/null || mktemp -d -t runlet)
 trap 'rm -rf "$temporary_dir"' EXIT HUP INT TERM
 
@@ -57,6 +61,8 @@ fi
 tar -xzf "$temporary_dir/$asset" -C "$temporary_dir" || fail 'could not extract the release archive.'
 [ -x "$temporary_dir/runlet/runlet" ] || fail 'the release archive does not contain the Runlet launcher.'
 [ -x "$temporary_dir/runlet/runtime/node" ] || fail 'the release archive does not contain its runtime.'
+installed_version=$(awk -F'"' '/"version"[[:space:]]*:/ { print $4; exit }' "$temporary_dir/runlet/package.json")
+[ -n "$installed_version" ] || fail 'the release archive does not declare a version.'
 
 case "$INSTALL_ROOT" in
   ''|'/'|"$HOME") fail "unsafe install location: $INSTALL_ROOT" ;;
@@ -103,7 +109,7 @@ case "${SHELL:-}" in
   *) add_path_to_profile "$HOME/.profile" ;;
 esac
 
-printf '\nRunlet installed successfully.\n'
+printf '\nRunlet %s installed successfully.\n' "$installed_version"
 if [ "$path_updated" -eq 1 ]; then
   printf 'Open a new terminal, then run: runlet\n'
 else
