@@ -177,7 +177,7 @@ function connectionsView() {
           <p>${escapeHtml(connection.note || (connection.available ? 'Connect Runlet to this AI.' : `Install ${connection.name} to connect it.`))}</p>
           <div class="invocation"><span>Use it with</span><code>${escapeHtml(connection.invocation)}</code></div>
         </div>
-        <button class="${connection.connected ? 'secondary' : 'primary'} connection-action" data-connection="${connection.id}" data-connected="${connection.connected}" ${connection.available ? '' : 'disabled'}>${connection.connected ? 'Disconnect' : 'Connect'}</button>
+        <button class="${connection.connected ? 'secondary' : 'primary'} connection-action" data-connection="${connection.id}" data-connected="${connection.connected}" data-action="${escapeHtml(connection.action || (connection.connected ? 'disconnect' : 'connect'))}" ${connection.available ? '' : 'disabled'}>${escapeHtml(connection.actionLabel || (connection.connected ? 'Disconnect' : 'Connect'))}</button>
       </article>`).join('');
   return `${topbar('Connections', 'Use Runlet from the AI apps installed on this computer.', iconButton('refresh', 'Refresh', 'id="refresh-connections"'))}<div class="page connection-list">${cards}</div>`;
 }
@@ -254,12 +254,13 @@ async function loadConnections() {
 
 async function changeConnection(button) {
   const provider = button.dataset.connection;
-  const disconnecting = button.dataset.connected === 'true';
+  const action = button.dataset.action;
+  const disconnecting = action === 'disconnect';
   button.disabled = true;
-  button.textContent = disconnecting ? 'Disconnecting…' : 'Connecting…';
+  button.textContent = action === 'install' ? 'Opening…' : disconnecting ? 'Disconnecting…' : 'Connecting…';
   try {
     const connection = await api(`/api/connections/${encodeURIComponent(provider)}`, { method: disconnecting ? 'DELETE' : 'POST' });
-    toast(connection.connected ? `${connection.name} connected.` : `${connection.name} disconnected.`);
+    toast(connection.message || (connection.connected ? `${connection.name} connected.` : `${connection.name} disconnected.`));
     await loadConnections();
   } catch (error) {
     toast(error.message, true);

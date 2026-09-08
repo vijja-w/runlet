@@ -32,6 +32,7 @@ Useful commands:
 
 ```bash
 runlet status
+runlet version
 runlet kill
 runlet open
 ```
@@ -89,6 +90,7 @@ Runlet uses a local stdio MCP server. It does not need to be published or expose
 Open **Connections** in Runlet to connect supported AI apps installed on the same computer.
 
 - Codex installs the bundled local Runlet plugin. Start a new task and use `@Runlet`.
+- Claude Desktop opens a small local extension installer. Approve it in Claude, then ask Claude to use Runlet.
 - Claude Code installs the bundled local Runlet plugin. Restart Claude Code or reload plugins, then use `/runlet:use`.
 
 Runlet does not manage AI accounts or API keys. Each AI app starts Runlet's local MCP process when it needs the tools.

@@ -143,6 +143,11 @@ async function uninstall() {
   await fs.rm(installRoot, { recursive: true, force: true });
 }
 
+async function version() {
+  const metadata = JSON.parse(await fs.readFile(path.join(appRoot, 'package.json'), 'utf8'));
+  console.log(metadata.version);
+}
+
 const command = process.argv[2] || 'start';
 try {
   if (command === 'mcp') await import('../src/mcp-server.mjs');
@@ -150,8 +155,9 @@ try {
   else if (command === 'status') await status();
   else if (command === 'kill' || command === 'stop') await kill();
   else if (command === 'uninstall') await uninstall();
+  else if (command === 'version' || command === '--version' || command === '-v') await version();
   else if (command === 'help' || command === '--help' || command === '-h') {
-    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
+    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet version   Show the installed version\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
   } else {
     console.error(`Unknown command: ${command}\nRun “runlet help” for available commands.`);
     process.exitCode = 1;

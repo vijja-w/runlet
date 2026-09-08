@@ -80,23 +80,27 @@ if [ -e "$backup" ]; then rm -rf "$backup"; fi
 ln -sfn "$INSTALL_ROOT/runlet" "$BIN_DIR/runlet"
 
 path_updated=0
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *)
-    case "${SHELL:-}" in
-      */zsh) profile="$HOME/.zshrc" ;;
-      */bash) profile="$HOME/.bashrc" ;;
-      *) profile="$HOME/.profile" ;;
-    esac
-    marker="# Runlet command"
-    if ! grep -F "$marker" "$profile" >/dev/null 2>&1; then
-      {
-        printf '\n%s\n' "$marker"
-        printf 'export PATH="%s:$PATH"\n' "$BIN_DIR"
-      } >> "$profile"
-    fi
+add_path_to_profile() {
+  profile="$1"
+  marker="# Runlet command"
+  if ! grep -F "$marker" "$profile" >/dev/null 2>&1; then
+    {
+      printf '\n%s\n' "$marker"
+      printf 'export PATH="%s:$PATH"\n' "$BIN_DIR"
+    } >> "$profile"
     path_updated=1
+  fi
+}
+case "${SHELL:-}" in
+  */zsh)
+    add_path_to_profile "$HOME/.zprofile"
+    add_path_to_profile "$HOME/.zshrc"
     ;;
+  */bash)
+    add_path_to_profile "$HOME/.bash_profile"
+    add_path_to_profile "$HOME/.bashrc"
+    ;;
+  *) add_path_to_profile "$HOME/.profile" ;;
 esac
 
 printf '\nRunlet installed successfully.\n'

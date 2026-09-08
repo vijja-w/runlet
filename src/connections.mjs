@@ -2,15 +2,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { strToU8, zipSync } from 'fflate';
 
 const execFileAsync = promisify(execFile);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const connectionRoot = path.join(
-  process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet'),
-  'connections',
-);
+const stateRoot = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet');
+const connectionRoot = path.join(stateRoot, 'connections');
 
 async function prepareMarketplace(provider) {
   const source = path.join(appRoot, 'distribution', provider);
@@ -52,6 +51,36 @@ async function findExecutable(name) {
     } catch {}
   }
   return null;
+}
+
+async function existingPath(candidates) {
+  for (const candidate of candidates.filter(Boolean)) {
+    if (await fs.access(candidate).then(() => true).catch(() => false)) return candidate;
+  }
+  return null;
+}
+
+async function findClaudeDesktop() {
+  if (process.platform === 'darwin') {
+    const direct = await existingPath([
+      '/Applications/Claude.app',
+      path.join(os.homedir(), 'Applications', 'Claude.app'),
+    ]);
+    if (direct) return direct;
+    const matches = (await output('/usr/bin/mdfind', ['kMDItemFSName == "Claude.app"']))
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter((value) => value.endsWith('.app'));
+    return existingPath(matches);
+  }
+  if (process.platform === 'win32') {
+    return existingPath([
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs', 'Claude', 'Claude.exe'),
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'AnthropicClaude', 'Claude.exe'),
+      process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'Claude', 'Claude.exe'),
+    ]);
+  }
+  return existingPath(['/usr/bin/claude-desktop', '/usr/local/bin/claude-desktop']);
 }
 
 async function output(command, args) {
@@ -99,8 +128,76 @@ async function claudeStatus() {
   };
 }
 
+async function claudeDesktopStatus() {
+  const application = await findClaudeDesktop();
+  return {
+    id: 'claude-desktop',
+    name: 'Claude Desktop',
+    available: Boolean(application),
+    connected: false,
+    status: application ? 'Ready to install' : 'Not installed',
+    invocation: 'Ask Claude to use Runlet',
+    action: 'install',
+    actionLabel: 'Install',
+    note: application
+      ? 'Installs a local Runlet extension. Claude will ask you to approve it.'
+      : 'Install Claude Desktop to add the local Runlet extension.',
+  };
+}
+
+export async function createClaudeDesktopExtension() {
+  const metadata = JSON.parse(await fs.readFile(path.join(appRoot, 'package.json'), 'utf8'));
+  const extensionRoot = path.join(connectionRoot, 'claude-desktop');
+  const bundlePath = path.join(extensionRoot, 'runlet.mcpb');
+  const serverPath = path.join(appRoot, 'src', 'mcp-server.mjs');
+  const wrapper = [
+    `process.env.RUNLET_STATE_DIR = ${JSON.stringify(stateRoot)};`,
+    `await import(${JSON.stringify(pathToFileURL(serverPath).href)});`,
+    '',
+  ].join('\n');
+  const manifest = {
+    $schema: 'https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json',
+    manifest_version: '0.4',
+    name: 'runlet-local',
+    display_name: 'Runlet',
+    version: metadata.version,
+    description: 'Use registered Runlet workspaces, Scripts, and Prompts from Claude Desktop.',
+    long_description: 'Runlet keeps local workspace files, small Scripts, and reusable Prompts together. This extension connects Claude Desktop to the Runlet installation on this computer.',
+    author: { name: 'Runlet' },
+    repository: { type: 'git', url: 'https://github.com/vijja-w/runlet' },
+    homepage: 'https://github.com/vijja-w/runlet',
+    server: {
+      type: 'node',
+      entry_point: 'server/index.mjs',
+      mcp_config: {
+        command: 'node',
+        args: ['${__dirname}/server/index.mjs'],
+        env: {},
+      },
+    },
+    tools_generated: true,
+    keywords: ['local', 'workspace', 'scripts', 'prompts'],
+    compatibility: { platforms: [process.platform] },
+  };
+  const archive = zipSync({
+    'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
+    'server/index.mjs': strToU8(wrapper),
+  }, { level: 9 });
+  await fs.mkdir(extensionRoot, { recursive: true });
+  await fs.writeFile(bundlePath, archive);
+  return bundlePath;
+}
+
+async function openClaudeDesktopExtension(application) {
+  const bundlePath = await createClaudeDesktopExtension();
+  if (process.platform === 'darwin') await run('/usr/bin/open', ['-a', application, bundlePath]);
+  else if (process.platform === 'win32') await run('cmd.exe', ['/d', '/s', '/c', 'start', '', bundlePath]);
+  else await run('xdg-open', [bundlePath]);
+  return bundlePath;
+}
+
 export async function listConnections() {
-  return Promise.all([codexStatus(), claudeStatus()]);
+  return Promise.all([codexStatus(), claudeDesktopStatus(), claudeStatus()]);
 }
 
 export async function connect(provider) {
@@ -127,6 +224,16 @@ export async function connect(provider) {
     }
     await run(command, ['plugin', 'install', 'runlet@runlet-local', '--scope', 'user', '--yes']);
     return claudeStatus();
+  }
+  if (provider === 'claude-desktop') {
+    const application = await findClaudeDesktop();
+    if (!application) throw new Error('Claude Desktop is not installed on this computer.');
+    await openClaudeDesktopExtension(application);
+    return {
+      ...await claudeDesktopStatus(),
+      status: 'Finish in Claude',
+      message: 'Claude Desktop opened the Runlet extension. Approve Install in Claude to finish.',
+    };
   }
   throw new Error('Unsupported AI connection.');
 }

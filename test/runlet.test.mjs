@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { strFromU8, unzipSync } from 'fflate';
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'runlet-test-'));
 process.env.RUNLET_STATE_DIR = path.join(temporaryRoot, 'state');
 const runlet = await import('../src/workspaces.mjs');
+const connections = await import('../src/connections.mjs');
 
 function simplePdf(text) {
   const escaped = String(text).replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
@@ -140,4 +142,24 @@ test('creates, lists, and edits a reusable Prompt', async () => {
   assert.match(updated.content, /every attached invoice/);
   const renamed = await runlet.updatePromptMetadata(current.id, 'extract-invoice', { name: 'Invoice Extractor', description: 'Extract invoice rows.' });
   assert.equal(renamed.name, 'Invoice Extractor');
+});
+
+test('builds a Claude Desktop extension for the installed Runlet server', async () => {
+  const bundlePath = await connections.createClaudeDesktopExtension();
+  const files = unzipSync(await fs.readFile(bundlePath));
+  assert.ok(files['manifest.json']);
+  assert.ok(files['server/index.mjs']);
+
+  const manifest = JSON.parse(strFromU8(files['manifest.json']));
+  assert.equal(manifest.manifest_version, '0.4');
+  assert.equal(manifest.name, 'runlet-local');
+  assert.equal(manifest.version, '0.3.0');
+  assert.equal(manifest.server.type, 'node');
+  assert.equal(manifest.server.entry_point, 'server/index.mjs');
+  assert.deepEqual(manifest.server.mcp_config.args, ['${__dirname}/server/index.mjs']);
+  assert.equal(manifest.tools_generated, true);
+
+  const wrapper = strFromU8(files['server/index.mjs']);
+  assert.match(wrapper, /RUNLET_STATE_DIR/);
+  assert.match(wrapper, /mcp-server\.mjs/);
 });
