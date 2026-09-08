@@ -286,32 +286,24 @@ function bindListControls(kind) {
 
   const list = document.querySelector(`[data-order-list="${plural}"]`);
   if (!list) return;
+  const dragSurface = list.closest('.shell');
   let draggedCard = null;
   let moved = false;
-  let pointerX = 0;
-  let pointerY = 0;
   let scrollSpeed = 0;
   let scrollFrame = null;
+  let dragImage = null;
 
-  const cardAtPointer = () => {
-    const direct = document.elementFromPoint(pointerX, pointerY)?.closest('[data-order-item]');
-    if (direct?.closest('[data-order-list]') === list && !direct.hidden) return { card: direct, after: null };
+  const moveAtScrollEdge = () => {
+    if (!draggedCard || !scrollSpeed) return;
     const bounds = list.getBoundingClientRect();
-    const cards = [...list.querySelectorAll('[data-order-item]:not([hidden])')].filter((card) => card !== draggedCard);
-    if (pointerY <= bounds.top + 84) {
-      return { card: cards.find((card) => card.getBoundingClientRect().bottom >= bounds.top) || cards[0], after: false };
-    }
-    if (pointerY >= bounds.bottom - 84) {
-      return { card: cards.findLast((card) => card.getBoundingClientRect().top <= bounds.bottom) || cards.at(-1), after: true };
-    }
-    return { card: null, after: null };
-  };
-
-  const moveCardAtPointer = () => {
-    const target = cardAtPointer();
-    if (!draggedCard || !target.card || target.card === draggedCard) return;
-    const after = target.after ?? pointerY > target.card.getBoundingClientRect().top + target.card.offsetHeight / 2;
-    const reference = after ? target.card.nextSibling : target.card;
+    const visibleCards = [...list.querySelectorAll('[data-order-item]:not([hidden])')].filter((card) => {
+      if (card === draggedCard) return false;
+      const cardBounds = card.getBoundingClientRect();
+      return cardBounds.bottom >= bounds.top && cardBounds.top <= bounds.bottom;
+    });
+    const target = scrollSpeed < 0 ? visibleCards[0] : visibleCards.at(-1);
+    if (!target) return;
+    const reference = scrollSpeed < 0 ? target : target.nextSibling;
     if (reference === draggedCard || draggedCard.nextSibling === reference) return;
     animateCardMove(list, draggedCard, reference);
     moved = true;
@@ -323,11 +315,11 @@ function bindListControls(kind) {
       return;
     }
     list.scrollTop += scrollSpeed;
-    moveCardAtPointer();
+    moveAtScrollEdge();
     scrollFrame = requestAnimationFrame(scrollList);
   };
 
-  const updateAutoScroll = () => {
+  const updateAutoScroll = (pointerY) => {
     const bounds = list.getBoundingClientRect();
     const edge = Math.min(84, bounds.height / 4);
     if (pointerY < bounds.top + edge) {
@@ -340,14 +332,15 @@ function bindListControls(kind) {
     if (scrollSpeed && !scrollFrame) scrollFrame = requestAnimationFrame(scrollList);
   };
 
-  const finishDrag = (handle, pointerId) => {
+  const finishDrag = () => {
     if (!draggedCard) return;
     draggedCard.classList.remove('dragging');
-    document.body.classList.remove('reordering');
+    draggedCard.draggable = false;
+    dragImage?.remove();
+    dragImage = null;
     scrollSpeed = 0;
     if (scrollFrame) cancelAnimationFrame(scrollFrame);
     scrollFrame = null;
-    if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
     if (moved) void saveListOrder(plural, list);
     draggedCard = null;
   };
@@ -355,26 +348,45 @@ function bindListControls(kind) {
   list.querySelectorAll('[data-drag-kind]').forEach((handle) => {
     const card = handle.closest('[data-order-item]');
     handle.addEventListener('click', (event) => event.stopPropagation());
-    handle.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0 || list.classList.contains('searching')) return;
-      event.preventDefault();
+    handle.addEventListener('pointerdown', () => {
+      if (!list.classList.contains('searching')) card.draggable = true;
+    });
+    card.addEventListener('dragstart', (event) => {
+      if (list.classList.contains('searching')) {
+        event.preventDefault();
+        return;
+      }
       draggedCard = card;
       moved = false;
-      pointerX = event.clientX;
-      pointerY = event.clientY;
-      handle.setPointerCapture(event.pointerId);
+      dragImage = document.createElement('span');
+      dragImage.className = 'invisible-drag-image';
+      document.body.append(dragImage);
+      event.dataTransfer.setDragImage(dragImage, 0, 0);
       draggedCard.classList.add('dragging');
-      document.body.classList.add('reordering');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', handle.dataset.dragSlug);
     });
-    handle.addEventListener('pointermove', (event) => {
-      if (!draggedCard) return;
-      pointerX = event.clientX;
-      pointerY = event.clientY;
-      moveCardAtPointer();
-      updateAutoScroll();
+    card.addEventListener('dragend', finishDrag);
+  });
+  list.querySelectorAll('[data-order-item]').forEach((card) => {
+    card.addEventListener('dragover', (event) => {
+      if (!draggedCard || card === draggedCard || card.hidden) return;
+      event.preventDefault();
+      const after = event.clientY > card.getBoundingClientRect().top + card.offsetHeight / 2;
+      const reference = after ? card.nextSibling : card;
+      if (reference === draggedCard || draggedCard.nextSibling === reference) return;
+      animateCardMove(list, draggedCard, reference);
+      moved = true;
     });
-    handle.addEventListener('pointerup', (event) => finishDrag(handle, event.pointerId));
-    handle.addEventListener('pointercancel', (event) => finishDrag(handle, event.pointerId));
+  });
+  dragSurface?.addEventListener('dragover', (event) => {
+    if (!draggedCard) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    updateAutoScroll(event.clientY);
+  });
+  dragSurface?.addEventListener('drop', (event) => {
+    if (draggedCard) event.preventDefault();
   });
 }
 
