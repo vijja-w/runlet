@@ -93,6 +93,8 @@ Values provided to run.js:
   pdf        Extract text from text-based PDFs
   csv        Parse and create CSV data
   zip        Extract and create ZIP archives
+  xlsx       Read and create Excel workbooks
+  docx       Extract text from Word documents
 
 Bundled helpers:
   workspace.read / readBytes / write / writeBytes
@@ -101,6 +103,8 @@ Bundled helpers:
   pdf.extractText
   csv.parse / stringify
   zip.extract / create
+  xlsx.read / create
+  docx.extractText
 
 Safe JavaScript globals:
   console.log, setTimeout, clearTimeout, TextEncoder, TextDecoder, URL

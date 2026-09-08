@@ -11,6 +11,8 @@ const logs = [];
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pdfAssetsRoot = path.join(packageRoot, 'node_modules', 'pdfjs-dist');
 let pdfJs;
+let excelJs;
+let mammothJs;
 
 async function loadPdfJs() {
   if (!pdfJs) {
@@ -26,6 +28,14 @@ async function loadPdfJs() {
     }
   }
   return pdfJs;
+}
+async function loadExcelJs() {
+  if (!excelJs) excelJs = (await import('exceljs')).default;
+  return excelJs;
+}
+async function loadMammoth() {
+  if (!mammothJs) mammothJs = (await import('mammoth')).default;
+  return mammothJs;
 }
 function inside(relativePath) {
   const root = path.resolve(workerData.workspacePath);
@@ -104,6 +114,49 @@ const zip = Object.freeze({
     return Uint8Array.from(zipSync(encoded, plain(options)));
   },
 });
+function spreadsheetValue(cell) {
+  const value = cell.value;
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== 'object') return value;
+  if ('result' in value) return value.result ?? `=${value.formula || value.sharedFormula || ''}`;
+  if (Array.isArray(value.richText)) return value.richText.map((part) => part.text || '').join('');
+  if ('text' in value) return value.text;
+  return cell.text;
+}
+const xlsx = Object.freeze({
+  async read(data) {
+    const ExcelJS = await loadExcelJs();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes(data, 'XLSX data'));
+    return {
+      sheets: workbook.worksheets.map((sheet) => ({
+        name: sheet.name,
+        rows: Array.from({ length: sheet.rowCount }, (_unused, rowIndex) =>
+          Array.from({ length: sheet.columnCount }, (_empty, columnIndex) => spreadsheetValue(sheet.getCell(rowIndex + 1, columnIndex + 1)))),
+      })),
+    };
+  },
+  async create(sheets) {
+    if (!sheets || typeof sheets !== 'object' || Array.isArray(sheets)) throw new TypeError('XLSX sheets must be an object keyed by sheet name.');
+    const ExcelJS = await loadExcelJs();
+    const workbook = new ExcelJS.Workbook();
+    for (const [name, rows] of Object.entries(sheets)) {
+      if (!Array.isArray(rows) || rows.some((row) => !Array.isArray(row))) throw new TypeError(`XLSX sheet ${name} must contain an array of row arrays.`);
+      const sheet = workbook.addWorksheet(String(name).slice(0, 31) || 'Sheet');
+      sheet.addRows(plain(rows));
+    }
+    if (!workbook.worksheets.length) workbook.addWorksheet('Sheet');
+    return Uint8Array.from(await workbook.xlsx.writeBuffer());
+  },
+});
+const docx = Object.freeze({
+  async extractText(data) {
+    const mammoth = await loadMammoth();
+    const result = await mammoth.extractRawText({ buffer: Buffer.from(bytes(data, 'DOCX data')) });
+    return result.value;
+  },
+});
 
 try {
   const source = await fs.readFile(path.join(workerData.actionDir, 'run.js'), 'utf8');
@@ -112,7 +165,7 @@ try {
   const context = vm.createContext({ console: Object.freeze({ log: (...values) => logs.push(values.join(' ')) }), setTimeout, clearTimeout, TextEncoder, TextDecoder, URL }, { codeGeneration: { strings: false, wasm: false } });
   const action = new vm.Script(transformed, { filename: 'run.js' }).runInContext(context, { timeout: 1_000 });
   if (typeof action !== 'function') throw new Error('The default export in run.js must be a function.');
-  await action({ workspace, run, input: Object.freeze({ ...(workerData.input || {}) }), pdf, csv, zip });
+  await action({ workspace, run, input: Object.freeze({ ...(workerData.input || {}) }), pdf, csv, zip, xlsx, docx });
   parentPort.postMessage({ ok: true, kind: 'script', status: 'completed', logs });
 } catch (error) {
   parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error), logs });

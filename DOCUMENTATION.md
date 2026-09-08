@@ -71,7 +71,7 @@ Controls may be text fields, numbers, or dropdowns. A dropdown can load unique o
 
 A specialized Script may include `index.html`. After the Script runs, that page opens in a separate browser tab. **Previous run** reopens it without running the Script again.
 
-Script JavaScript runs locally in an isolated worker and receives only Runlet's built-in APIs. See [Script JavaScript API and bundled libraries](SCRIPTING.md), or run:
+Script JavaScript runs locally in an isolated worker and receives only Runlet's built-in APIs, including helpers for PDF, CSV, ZIP, Excel `.xlsx`, and Word `.docx` files. See [Script JavaScript API and bundled libraries](SCRIPTING.md), or run:
 
 ```bash
 runlet libraries

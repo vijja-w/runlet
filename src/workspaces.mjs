@@ -317,7 +317,7 @@ export function getActionTemplate(kind = 'script', withView = false) {
   return {
     kind,
     ...shared,
-    runJsGuidance: 'run.js must export one default async function receiving { workspace, run, pdf, csv, zip }. Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, pdf.extractText, csv.parse/stringify, zip.extract/create, and run.log. Do not import modules or access paths outside the registered workspace.',
+    runJsGuidance: 'run.js must export one default async function receiving { workspace, run, pdf, csv, zip, xlsx, docx }. Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log. Do not import modules or access paths outside the registered workspace.',
   };
 }
 
@@ -364,10 +364,10 @@ export function getScriptTemplate(withView = false) {
       'Use a lower-case kebab-case folder name beneath scripts/.',
       'Store the editable display name, description, controls, and result panels in runlet.json.',
       'Treat README.md as the plain-language user interface.',
-      'run.js receives { workspace, run, input, pdf, csv, zip }. Use input values declared by the controls.',
+      'run.js receives { workspace, run, input, pdf, csv, zip, xlsx, docx }. Use input values declared by the controls.',
       'Controls may be text, number, or select. A select may load unique values from a workspace CSV column.',
       'Results may display an outputs/ text file as a summary or an outputs/ CSV file as a table.',
-      'Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, pdf.extractText, csv.parse/stringify, zip.extract/create, and run.log.',
+      'Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log.',
       'Write every generated file beneath this Script’s outputs/ directory.',
       'Runlet generates the normal interactive interface. Add index.html only for a specialized dashboard.',
     ],

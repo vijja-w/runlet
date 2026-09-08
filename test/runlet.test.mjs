@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +35,15 @@ function simplePdf(text) {
   source += offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
   source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
   return Buffer.from(source, 'ascii');
+}
+
+function simpleDocx(text) {
+  const escaped = String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return Buffer.from(zipSync({
+    '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+    '_rels/.rels': strToU8('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'),
+    'word/document.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${escaped}</w:t></w:r></w:p></w:body></w:document>`),
+  }));
 }
 
 test.after(async () => {
@@ -135,6 +144,35 @@ test('Scripts can extract PDF text and use bundled CSV and ZIP helpers', async (
   assert.ok((await fs.stat(path.join(current.path, 'scripts/document-tools/outputs/invoice.zip'))).size > 0);
 });
 
+test('Scripts can create and read XLSX files and extract DOCX text', async () => {
+  const current = await runlet.getCurrentWorkspace();
+  await runlet.createScript({
+    workspaceId: current.id,
+    slug: 'office-tools',
+    name: 'Office Tools',
+    description: 'Exercise the bundled Excel and Word helpers.',
+    readme: '# Office Tools\n\nExercise the bundled Excel and Word helpers.\n',
+    runJs: `export default async function ({ workspace, run, xlsx, docx }) {
+      const workbook = await xlsx.create({ Prices: [['ingredient', 'price'], ['Walnuts', 46.17]] });
+      await workspace.writeBytes('scripts/office-tools/outputs/prices.xlsx', workbook);
+      const restored = await xlsx.read(workbook);
+      const word = await workspace.readBytes('scripts/office-tools/inputs/note.docx');
+      const text = await docx.extractText(word);
+      await workspace.write('scripts/office-tools/outputs/result.json', { sheets: restored.sheets, text: text.trim() });
+      run.log('Processed Excel and Word files.');
+    }`,
+  });
+  await runlet.writeScriptInput(current.id, 'office-tools', 'note.docx', simpleDocx('Runlet Word helper'));
+
+  const result = await runlet.runScript(current.id, 'office-tools');
+  assert.deepEqual(result.logs, ['Processed Excel and Word files.']);
+  const output = JSON.parse(await runlet.readFile(current.id, 'scripts/office-tools/outputs/result.json'));
+  assert.equal(output.sheets[0].name, 'Prices');
+  assert.deepEqual(output.sheets[0].rows, [['ingredient', 'price'], ['Walnuts', 46.17]]);
+  assert.equal(output.text, 'Runlet Word helper');
+  assert.ok((await fs.stat(path.join(current.path, 'scripts/office-tools/outputs/prices.xlsx'))).size > 0);
+});
+
 test('creates, lists, and edits a reusable Prompt', async () => {
   const current = await runlet.getCurrentWorkspace();
   const created = await runlet.createPrompt({
@@ -170,9 +208,10 @@ test('saves custom Script and Prompt ordering', async () => {
       runJs: 'export default async function () {}',
     });
   }
-  const scripts = await runlet.reorderItems(current.id, 'scripts', ['zulu-script', 'document-tools', 'alpha-script']);
-  assert.deepEqual(scripts.map((item) => item.slug), ['zulu-script', 'document-tools', 'alpha-script']);
-  assert.deepEqual((await runlet.listScripts(current.id)).map((item) => item.slug), ['zulu-script', 'document-tools', 'alpha-script']);
+  const scriptOrder = ['zulu-script', 'office-tools', 'document-tools', 'alpha-script'];
+  const scripts = await runlet.reorderItems(current.id, 'scripts', scriptOrder);
+  assert.deepEqual(scripts.map((item) => item.slug), scriptOrder);
+  assert.deepEqual((await runlet.listScripts(current.id)).map((item) => item.slug), scriptOrder);
   await assert.rejects(runlet.reorderItems(current.id, 'scripts', ['zulu-script', 'zulu-script']), /changed/i);
 
   for (const [slug, name] of [['first-prompt', 'First Prompt'], ['second-prompt', 'Second Prompt']]) {
@@ -198,7 +237,7 @@ test('builds a Claude Desktop extension for the installed Runlet server', async 
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
   assert.equal(manifest.manifest_version, '0.4');
   assert.equal(manifest.name, 'runlet-local');
-  assert.equal(manifest.version, '0.17.0');
+  assert.equal(manifest.version, '0.18.0');
   assert.equal(manifest.server.type, 'node');
   assert.equal(manifest.server.entry_point, 'server/index.mjs');
   assert.deepEqual(manifest.server.mcp_config.args, ['${__dirname}/server/index.mjs']);
@@ -216,8 +255,8 @@ test('detects an installed Claude extension as connected', async () => {
     extensions: {
       'local.mcpb.runlet.runlet-local': {
         id: 'local.mcpb.runlet.runlet-local',
-        version: '0.17.0',
-        manifest: { name: 'runlet-local', version: '0.17.0' },
+        version: '0.18.0',
+        manifest: { name: 'runlet-local', version: '0.18.0' },
       },
     },
   }));
@@ -235,13 +274,15 @@ test('detects an installed Claude extension as connected', async () => {
 
 test('shows version and update commands in the CLI', async () => {
   const versionResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'version']);
-  assert.equal(versionResult.stdout.trim(), '0.17.0');
+  assert.equal(versionResult.stdout.trim(), '0.18.0');
   const helpResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'help']);
   assert.match(helpResult.stdout, /runlet update\s+Check for and install the latest release/);
   assert.match(helpResult.stdout, /runlet libraries\s+Show the JavaScript APIs available to Scripts/);
   const librariesResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'libraries']);
   assert.match(librariesResult.stdout, /pdf\.extractText/);
   assert.match(librariesResult.stdout, /csv\.parse \/ stringify/);
+  assert.match(librariesResult.stdout, /xlsx\.read \/ create/);
+  assert.match(librariesResult.stdout, /docx\.extractText/);
   assert.match(librariesResult.stdout, /Scripts cannot import packages/);
   assert.match(librariesResult.stdout, /SCRIPTING\.md/);
 });

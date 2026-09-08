@@ -13,7 +13,7 @@ runlet libraries
 `run.js` exports one default async function:
 
 ```js
-export default async function ({ workspace, run, input, pdf, csv, zip }) {
+export default async function ({ workspace, run, input, pdf, csv, zip, xlsx, docx }) {
   run.log('Starting');
 }
 ```
@@ -21,7 +21,7 @@ export default async function ({ workspace, run, input, pdf, csv, zip }) {
 - `workspace` reads and changes files inside the registered workspace.
 - `run` writes messages to the Runlet run log.
 - `input` contains values from controls declared in `runlet.json`.
-- `pdf`, `csv`, and `zip` are bundled file helpers.
+- `pdf`, `csv`, `zip`, `xlsx`, and `docx` are bundled file helpers.
 
 Scripts cannot use `import`, `require`, Node.js filesystem APIs, `process`, child processes, shell commands, native binaries, installed npm packages, secrets, or paths outside the registered workspace.
 
@@ -112,6 +112,45 @@ await workspace.writeBytes('scripts/example/outputs/results.zip', archive);
 ```
 
 The ZIP helper uses the bundled `fflate` library.
+
+## Excel helper
+
+- `await xlsx.read(bytes)` reads an `.xlsx` workbook.
+- It returns `{ sheets }`. Each sheet is `{ name, rows }`, and `rows` is an array of row arrays.
+- Numbers and booleans remain typed. Dates become ISO strings. Formula cells return their saved result when available.
+- `await xlsx.create(sheets)` creates an `.xlsx` workbook as a `Uint8Array`.
+- `sheets` is an object keyed by sheet name, with an array of row arrays for each value.
+
+```js
+const workbook = await xlsx.create({
+  Prices: [
+    ['ingredient', 'price'],
+    ['Walnuts', 46.17],
+  ],
+});
+await workspace.writeBytes('scripts/example/outputs/prices.xlsx', workbook);
+
+const source = await workspace.readBytes('scripts/example/inputs/source.xlsx');
+const data = await xlsx.read(source);
+run.log(`Read ${data.sheets.length} sheets`);
+```
+
+The Excel helper uses the bundled `exceljs` library. It intentionally exposes rows rather than ExcelJS objects, keeping Script data portable and safe.
+
+## Word helper
+
+- `await docx.extractText(bytes)` extracts the readable text from a `.docx` Word document.
+- Pass bytes returned by `workspace.readBytes()`.
+- Paragraphs are separated by blank lines.
+- Formatting, images, comments, and tracked-change details are not preserved.
+
+```js
+const source = await workspace.readBytes('scripts/example/inputs/report.docx');
+const text = await docx.extractText(source);
+await workspace.write('scripts/example/outputs/report.txt', text);
+```
+
+The Word helper uses the bundled `mammoth` library.
 
 ## Safe JavaScript globals
 
