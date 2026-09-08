@@ -12,7 +12,7 @@ Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.j
 
 Prompts are reusable AI instructions under prompts/<kebab-case-slug>/PROMPT.md. They are not programs and do not launch a second AI. When asked to create a Prompt, call get_prompt_template and then create_prompt. When asked to use a Prompt, call get_prompt and follow its content using files attached to the conversation or explicitly named workspace files. The user can also copy a Prompt from Runlet and paste it into any compatible AI.`;
 
-const server = new McpServer({ name: 'runlet', version: '0.16.0' }, { instructions });
+const server = new McpServer({ name: 'runlet', version: '0.17.0' }, { instructions });
 const textResult = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
 const workspaceId = z.string().optional().describe('Registered workspace ID. Omit only when the intended workspace is already selected.');
 const encodedData = {

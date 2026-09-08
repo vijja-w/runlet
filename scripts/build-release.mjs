@@ -44,6 +44,9 @@ for (const directory of ['bin', 'src', 'public', 'distribution', 'node_modules']
   await fs.cp(path.join(appRoot, directory), path.join(packageRoot, directory), { recursive: true });
 }
 await fs.copyFile(path.join(appRoot, 'package.json'), path.join(packageRoot, 'package.json'));
+for (const document of ['README.md', 'DOCUMENTATION.md', 'SCRIPTING.md']) {
+  await fs.copyFile(path.join(appRoot, document), path.join(packageRoot, document));
+}
 await fs.copyFile(nodeLicensePath, path.join(packageRoot, 'runtime', 'LICENSE-node.txt'));
 
 if (platform === 'windows') {
