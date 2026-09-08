@@ -54,9 +54,11 @@ app.post('/api/files/open', route(async ({ body }) => {
 app.post('/api/scripts/:slug/run', route(async ({ params, body }) => workshop.runScript(body.workspaceId, params.slug, body.input || {})));
 app.get('/api/scripts/:slug/results', route(async ({ params, query }) => workshop.getScriptResults(query.workspaceId, params.slug)));
 app.patch('/api/scripts/:slug', route(async ({ params, body }) => workshop.updateScriptMetadata(body.workspaceId, params.slug, body)));
+app.delete('/api/scripts/:slug', route(async ({ params, body }) => workshop.deleteScript(body.workspaceId, params.slug)));
 app.post('/api/scripts/:slug/inputs', route(async ({ params, body }) => workshop.writeScriptInput(body.workspaceId, params.slug, body.name, Buffer.from(body.data, 'base64'))));
 app.put('/api/prompts/:slug', route(async ({ params, body }) => workshop.updatePrompt(body.workspaceId, params.slug, body.content)));
 app.patch('/api/prompts/:slug', route(async ({ params, body }) => workshop.updatePromptMetadata(body.workspaceId, params.slug, body)));
+app.delete('/api/prompts/:slug', route(async ({ params, body }) => workshop.deletePrompt(body.workspaceId, params.slug)));
 
 app.get('/script-view/:workspaceId/:slug/*rest', route(async (request, response) => {
   const workspace = await workshop.getWorkspace(request.params.workspaceId);

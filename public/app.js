@@ -118,7 +118,7 @@ function scriptDetail(script) {
     ? script.controls.map((control) => renderScriptControl(control)).join('')
     : '<p class="muted">This Script is ready to run.</p>';
   const resultPanels = scriptResults.filter((result) => !result.missing).map(renderResult).join('');
-  const topControls = script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Open</a>` : '';
+  const topControls = `${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Open</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
   return `${topbar(script.name, script.description, topControls, 'script')}<div class="script-app">
     <form id="script-run-form" class="control-panel">
       <div class="control-grid">${controlFields}</div>
@@ -148,7 +148,7 @@ function renderResult(result) {
 }
 
 function promptDetail(prompt) {
-  const controls = `<button class="secondary copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy prompt</button>`;
+  const controls = `<button class="secondary copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy prompt</button>${iconButton('remove', 'Delete Prompt', `data-delete-kind="prompt" data-delete-slug="${escapeHtml(prompt.slug)}"`)}`;
   return `${topbar(prompt.name, prompt.description, controls, 'prompt')}<div class="prompt-page">
     <form id="prompt-form" class="prompt-editor">
       <label for="prompt-content">Prompt</label>
@@ -224,6 +224,7 @@ function bindEvents() {
     render();
   });
   document.querySelectorAll('[data-copy-prompt]').forEach((button) => button.onclick = (event) => { event.stopPropagation(); copyPrompt(button.dataset.copyPrompt); });
+  document.querySelectorAll('[data-delete-kind]').forEach((button) => button.onclick = () => confirmDeleteItem(button.dataset.deleteKind, button.dataset.deleteSlug));
   document.querySelectorAll('[data-open-file]').forEach((button) => button.onclick = () => openFile(button.dataset.openFile));
   document.querySelectorAll('[data-folder]').forEach((button) => button.onclick = () => openFolder(button.dataset.folder));
   document.querySelectorAll('[data-file-path]').forEach((button) => button.onclick = () => openFolder(button.dataset.filePath));
@@ -357,6 +358,49 @@ async function savePrompt(event) {
     await refresh();
     toast('Prompt saved.');
   } catch (error) { toast(error.message, true); }
+}
+
+function confirmDeleteItem(kind, slug) {
+  const item = kind === 'script' ? selectedScript : selectedPrompt;
+  if (!item || item.slug !== slug) return;
+  const label = kind === 'script' ? 'Script' : 'Prompt';
+  const detail = kind === 'script'
+    ? 'Its inputs, outputs, and generated files will also be permanently deleted.'
+    : 'Its saved instructions will be permanently deleted.';
+  modal(`<div class="modal-head"><h2>Delete ${label}?</h2><button class="modal-close" aria-label="Close" title="Close">×</button></div>
+    <div class="delete-confirmation">
+      <p><b>${escapeHtml(item.name)}</b></p>
+      <p>${detail}</p>
+      <div class="confirmation-actions"><button class="secondary modal-close-action">Cancel</button><button class="danger-button" data-confirm-delete>Delete ${label}</button></div>
+    </div>`);
+  document.querySelector('.modal-close-action').onclick = closeModal;
+  document.querySelector('[data-confirm-delete]').onclick = (event) => deleteItem(kind, slug, event.currentTarget);
+}
+
+async function deleteItem(kind, slug, button) {
+  const item = kind === 'script' ? selectedScript : selectedPrompt;
+  if (!item || item.slug !== slug) return;
+  button.disabled = true;
+  button.textContent = 'Deleting…';
+  try {
+    await api(`/api/${kind}s/${encodeURIComponent(slug)}`, { method: 'DELETE', body: JSON.stringify({ workspaceId: state.selected.id }) });
+    if (kind === 'script') {
+      selectedScript = null;
+      scriptResults = [];
+      scriptInputValues = {};
+      view = 'scripts';
+    } else {
+      selectedPrompt = null;
+      view = 'prompts';
+    }
+    closeModal();
+    await refresh();
+    toast(`${item.name} was deleted.`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = `Delete ${kind === 'script' ? 'Script' : 'Prompt'}`;
+    toast(error.message, true);
+  }
 }
 
 function workspaceSwitcher() {

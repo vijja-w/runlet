@@ -394,6 +394,13 @@ export async function updateScriptMetadata(workspaceId, slug, { name, descriptio
   return getScript(workspace.id, slug);
 }
 
+export async function deleteScript(workspaceId, slug) {
+  const workspace = await getWorkspace(workspaceId);
+  const script = await getScript(workspace.id, slug);
+  await fs.rm(resolveInside(workspace.path, path.join('scripts', slug)), { recursive: true });
+  return { deleted: { slug: script.slug, name: script.name } };
+}
+
 export async function runScript(workspaceId, slug, input = {}) {
   const workspace = await getWorkspace(workspaceId);
   const script = await getScript(workspace.id, slug);

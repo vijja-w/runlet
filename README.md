@@ -123,6 +123,8 @@ prompts/
 
 A Script is a small local app. Runlet uses `runlet.json` to generate its controls and result panels, so a person can choose values, select Run, and review the result without seeing code. A specialized Script may also provide its own `index.html`.
 
+Open a Script and use the trash button to permanently delete it together with its inputs and outputs.
+
 The JavaScript runs locally in an isolated worker, not in the browser page. It uses only Runlet's built-in APIs, so each Script does not need packages or a separate installation. Its `run.js` exports one default function:
 
 ```js
@@ -176,6 +178,8 @@ Paths are relative to the registered workspace. Scripts have a 30-second limit a
 ## Prompts
 
 A Prompt is a reusable set of instructions for an AI. Runlet stores it and makes it available to Codex or another MCP-capable AI. It does not choose a provider or launch a second agent.
+
+Open a Prompt and use the trash button to permanently delete it.
 
 Its `PROMPT.md` should name:
 

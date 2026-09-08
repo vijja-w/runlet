@@ -94,6 +94,11 @@ test('creates and runs a Script', async () => {
   const binary = Buffer.from([0, 1, 2, 255]);
   await runlet.writeScriptOutput(current.id, 'copy-text', 'nested/result.bin', binary);
   assert.deepEqual(await fs.readFile(path.join(current.path, 'scripts/copy-text/outputs/nested/result.bin')), binary);
+
+  const deleted = await runlet.deleteScript(current.id, 'copy-text');
+  assert.equal(deleted.deleted.name, 'Recipe Note');
+  await assert.rejects(runlet.getScript(current.id, 'copy-text'), /Script not found/);
+  await assert.rejects(fs.access(path.join(current.path, 'scripts/copy-text')));
 });
 
 test('Scripts can extract PDF text and use bundled CSV and ZIP helpers', async () => {
@@ -142,6 +147,11 @@ test('creates, lists, and edits a reusable Prompt', async () => {
   assert.match(updated.content, /every attached invoice/);
   const renamed = await runlet.updatePromptMetadata(current.id, 'extract-invoice', { name: 'Invoice Extractor', description: 'Extract invoice rows.' });
   assert.equal(renamed.name, 'Invoice Extractor');
+
+  const deleted = await runlet.deletePrompt(current.id, 'extract-invoice');
+  assert.equal(deleted.deleted.name, 'Invoice Extractor');
+  await assert.rejects(runlet.getPrompt(current.id, 'extract-invoice'), /Prompt not found/);
+  await assert.rejects(fs.access(path.join(current.path, 'prompts/extract-invoice')));
 });
 
 test('builds a Claude Desktop extension for the installed Runlet server', async () => {
@@ -153,7 +163,7 @@ test('builds a Claude Desktop extension for the installed Runlet server', async 
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
   assert.equal(manifest.manifest_version, '0.4');
   assert.equal(manifest.name, 'runlet-local');
-  assert.equal(manifest.version, '0.3.0');
+  assert.equal(manifest.version, '0.4.0');
   assert.equal(manifest.server.type, 'node');
   assert.equal(manifest.server.entry_point, 'server/index.mjs');
   assert.deepEqual(manifest.server.mcp_config.args, ['${__dirname}/server/index.mjs']);
