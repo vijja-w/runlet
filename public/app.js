@@ -601,15 +601,23 @@ async function deleteItem(kind, slug, button) {
 function workspaceSwitcher() {
   modal(`<div class="modal-head"><h2>Workspaces</h2><div class="modal-head-actions">${iconButton('add', 'Add workspace', 'id="add-workspace"')}<button class="modal-close" aria-label="Close" title="Close">×</button></div></div>
     <div class="workspace-list">${state.workspaces.map((workspace) => `<div class="workspace-row ${workspace.id === state.selected.id ? 'selected' : ''}">
-      <button data-select="${workspace.id}" class="workspace-choice"><span><b class="editable-workspace-name" contenteditable="plaintext-only" spellcheck="true" data-workspace-name="${workspace.id}" title="Click to rename">${escapeHtml(workspace.name)}</b><small>${escapeHtml(workspace.path)}</small></span></button>
+      <div data-select="${workspace.id}" class="workspace-choice" role="button" tabindex="0"><span><b class="editable-workspace-name" contenteditable="plaintext-only" spellcheck="true" data-workspace-name="${workspace.id}" title="Click to rename">${escapeHtml(workspace.name)}</b><small>${escapeHtml(workspace.path)}</small></span></div>
       <div class="workspace-actions">${iconButton('remove', 'Remove workspace', `data-remove="${workspace.id}"`)}</div>
     </div>`).join('')}</div>`);
-  document.querySelectorAll('[data-select]').forEach((button) => button.onclick = async () => {
-    await api(`/api/workspaces/${button.dataset.select}/select`, { method:'POST' });
-    closeModal();
-    await refresh();
+  document.querySelectorAll('[data-select]').forEach((choice) => {
+    choice.onclick = async () => {
+      await api(`/api/workspaces/${choice.dataset.select}/select`, { method:'POST' });
+      closeModal();
+      await refresh();
+    };
+    choice.addEventListener('keydown', (event) => {
+      if (event.target.closest('[contenteditable]') || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      choice.click();
+    });
   });
   document.querySelectorAll('[data-workspace-name]').forEach((element) => {
+    element.addEventListener('pointerdown', (event) => event.stopPropagation());
     element.addEventListener('click', (event) => event.stopPropagation());
     element.addEventListener('keydown', (event) => {
       event.stopPropagation();
