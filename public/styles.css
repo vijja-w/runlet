@@ -202,7 +202,7 @@ nav em {
 .drag-handle:focus-visible { border-radius: 6px; outline: 3px solid var(--accent-soft); }
 .drag-handle:active { cursor: grabbing; }
 .drag-handle svg { width: 20px; height: 20px; fill: currentColor; }
-.action-list.searching .drag-handle { display: none; }
+.action-list.searching .drag-handle { visibility: hidden; pointer-events: none; }
 .action-card.dragging { opacity: .32; border-color: var(--accent); box-shadow: 0 8px 28px rgba(32, 32, 29, .12); }
 .kind {
   display: inline-flex;

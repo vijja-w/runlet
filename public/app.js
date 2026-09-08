@@ -325,6 +325,11 @@ function bindListControls(kind) {
       moved = true;
     });
   });
+  list.addEventListener('dragover', (event) => {
+    if (!draggedCard) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  });
   list.addEventListener('drop', (event) => {
     if (!draggedCard) return;
     event.preventDefault();
