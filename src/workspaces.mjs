@@ -20,14 +20,15 @@ function normalizeState(state) {
     usedNames.add(name.toLowerCase());
     return { ...workspace, name };
   });
-  return { selectedId: state?.selectedId || null, ...state, workspaces };
+  const orders = state?.orders && typeof state.orders === 'object' && !Array.isArray(state.orders) ? state.orders : {};
+  return { selectedId: state?.selectedId || null, ...state, workspaces, orders };
 }
 
 async function loadState() {
   try { return normalizeState(JSON.parse(await fs.readFile(statePath, 'utf8'))); }
   catch {
     try { return normalizeState(JSON.parse(await fs.readFile(legacyStatePath, 'utf8'))); }
-    catch { return { selectedId: null, workspaces: [] }; }
+    catch { return { selectedId: null, workspaces: [], orders: {} }; }
   }
 }
 
@@ -129,9 +130,30 @@ export async function removeWorkspace(id) {
   const removed = state.workspaces.find((workspace) => workspace.id === id);
   if (!removed) throw new Error('Workspace not found.');
   state.workspaces = state.workspaces.filter((workspace) => workspace.id !== id);
+  delete state.orders?.[id];
   if (state.selectedId === id) state.selectedId = state.workspaces[0]?.id || null;
   await saveState(state);
   return { removed: { id: removed.id, name: removed.name, path: removed.path }, selectedId: state.selectedId };
+}
+
+function applySavedOrder(items, order = []) {
+  const itemsBySlug = new Map(items.map((item) => [item.slug, item]));
+  const ordered = [];
+  for (const slug of Array.isArray(order) ? order : []) {
+    const item = itemsBySlug.get(slug);
+    if (!item) continue;
+    ordered.push(item);
+    itemsBySlug.delete(slug);
+  }
+  return [...ordered, ...[...itemsBySlug.values()].sort((a, b) => a.name.localeCompare(b.name))];
+}
+
+async function removeFromSavedOrder(workspaceId, kind, slug) {
+  const state = await loadState();
+  const order = state.orders?.[workspaceId]?.[kind];
+  if (!Array.isArray(order) || !order.includes(slug)) return;
+  state.orders[workspaceId][kind] = order.filter((item) => item !== slug);
+  await saveState(state);
 }
 
 export function resolveInside(workspacePath, relativePath = '.') {
@@ -301,6 +323,7 @@ export function getActionTemplate(kind = 'script', withView = false) {
 
 export async function listScripts(workspaceId) {
   const workspace = await getWorkspace(workspaceId);
+  const state = await loadState();
   const scriptsRoot = resolveInside(workspace.path, 'scripts');
   await fs.mkdir(scriptsRoot, { recursive: true });
   const entries = await fs.readdir(scriptsRoot, { withFileTypes: true });
@@ -324,7 +347,7 @@ export async function listScripts(workspaceId) {
       results: Array.isArray(metadata.interface?.results) ? metadata.interface.results : [],
     });
   }
-  return scripts.sort((a, b) => a.name.localeCompare(b.name));
+  return applySavedOrder(scripts, state.orders?.[workspace.id]?.scripts);
 }
 
 export async function getScript(workspaceId, slug) {
@@ -398,6 +421,7 @@ export async function deleteScript(workspaceId, slug) {
   const workspace = await getWorkspace(workspaceId);
   const script = await getScript(workspace.id, slug);
   await fs.rm(resolveInside(workspace.path, path.join('scripts', slug)), { recursive: true });
+  await removeFromSavedOrder(workspace.id, 'scripts', slug);
   return { deleted: { slug: script.slug, name: script.name } };
 }
 
@@ -475,6 +499,7 @@ export async function writeScriptOutput(workspaceId, slug, name, data) {
 
 export async function listPrompts(workspaceId) {
   const workspace = await getWorkspace(workspaceId);
+  const state = await loadState();
   const promptsRoot = resolveInside(workspace.path, 'prompts');
   await fs.mkdir(promptsRoot, { recursive: true });
   const entries = await fs.readdir(promptsRoot, { withFileTypes: true });
@@ -488,7 +513,23 @@ export async function listPrompts(workspaceId) {
     const metadata = await readMetadata(directory, { name: info.title, description: info.description });
     prompts.push({ slug: entry.name, name: metadata.name, description: metadata.description, content });
   }
-  return prompts.sort((a, b) => a.name.localeCompare(b.name));
+  return applySavedOrder(prompts, state.orders?.[workspace.id]?.prompts);
+}
+
+export async function reorderItems(workspaceId, kind, slugs) {
+  if (!['scripts', 'prompts'].includes(kind)) throw new Error('Only Scripts and Prompts can be reordered.');
+  const workspace = await getWorkspace(workspaceId);
+  const items = kind === 'scripts' ? await listScripts(workspace.id) : await listPrompts(workspace.id);
+  const requested = Array.isArray(slugs) ? slugs.map(String) : [];
+  const existing = new Set(items.map((item) => item.slug));
+  if (requested.length !== existing.size || new Set(requested).size !== requested.length || requested.some((slug) => !existing.has(slug))) {
+    throw new Error(`The ${kind} list changed. Refresh and try again.`);
+  }
+  const state = await loadState();
+  state.orders ||= {};
+  state.orders[workspace.id] = { ...(state.orders[workspace.id] || {}), [kind]: requested };
+  await saveState(state);
+  return kind === 'scripts' ? listScripts(workspace.id) : listPrompts(workspace.id);
 }
 
 export async function getPrompt(workspaceId, slug) {
@@ -550,6 +591,7 @@ export async function deletePrompt(workspaceId, slug) {
   const workspace = await getWorkspace(workspaceId);
   const prompt = await getPrompt(workspace.id, slug);
   await fs.rm(resolveInside(workspace.path, path.join('prompts', slug)), { recursive: true });
+  await removeFromSavedOrder(workspace.id, 'prompts', slug);
   return { deleted: { slug: prompt.slug, name: prompt.name } };
 }
 

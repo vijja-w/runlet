@@ -55,6 +55,7 @@ app.post('/api/scripts/:slug/run', route(async ({ params, body }) => workshop.ru
 app.get('/api/scripts/:slug/results', route(async ({ params, query }) => workshop.getScriptResults(query.workspaceId, params.slug)));
 app.patch('/api/scripts/:slug', route(async ({ params, body }) => workshop.updateScriptMetadata(body.workspaceId, params.slug, body)));
 app.delete('/api/scripts/:slug', route(async ({ params, body }) => workshop.deleteScript(body.workspaceId, params.slug)));
+app.put('/api/order/:kind', route(async ({ params, body }) => workshop.reorderItems(body.workspaceId, params.kind, body.slugs)));
 app.post('/api/scripts/:slug/inputs', route(async ({ params, body }) => workshop.writeScriptInput(body.workspaceId, params.slug, body.name, Buffer.from(body.data, 'base64'))));
 app.put('/api/prompts/:slug', route(async ({ params, body }) => workshop.updatePrompt(body.workspaceId, params.slug, body.content)));
 app.patch('/api/prompts/:slug', route(async ({ params, body }) => workshop.updatePromptMetadata(body.workspaceId, params.slug, body)));

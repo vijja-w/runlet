@@ -158,6 +158,37 @@ test('creates, lists, and edits a reusable Prompt', async () => {
   await assert.rejects(fs.access(path.join(current.path, 'prompts/extract-invoice')));
 });
 
+test('saves custom Script and Prompt ordering', async () => {
+  const current = await runlet.getCurrentWorkspace();
+  for (const [slug, name] of [['alpha-script', 'Alpha Script'], ['zulu-script', 'Zulu Script']]) {
+    await runlet.createScript({
+      workspaceId: current.id,
+      slug,
+      name,
+      description: `${name} description.`,
+      readme: `# ${name}\n\n${name} description.\n`,
+      runJs: 'export default async function () {}',
+    });
+  }
+  const scripts = await runlet.reorderItems(current.id, 'scripts', ['zulu-script', 'document-tools', 'alpha-script']);
+  assert.deepEqual(scripts.map((item) => item.slug), ['zulu-script', 'document-tools', 'alpha-script']);
+  assert.deepEqual((await runlet.listScripts(current.id)).map((item) => item.slug), ['zulu-script', 'document-tools', 'alpha-script']);
+  await assert.rejects(runlet.reorderItems(current.id, 'scripts', ['zulu-script', 'zulu-script']), /changed/i);
+
+  for (const [slug, name] of [['first-prompt', 'First Prompt'], ['second-prompt', 'Second Prompt']]) {
+    await runlet.createPrompt({
+      workspaceId: current.id,
+      slug,
+      name,
+      description: `${name} description.`,
+      content: `# ${name}\n\n${name} description.\n`,
+    });
+  }
+  const prompts = await runlet.reorderItems(current.id, 'prompts', ['second-prompt', 'first-prompt']);
+  assert.deepEqual(prompts.map((item) => item.slug), ['second-prompt', 'first-prompt']);
+  assert.deepEqual((await runlet.listPrompts(current.id)).map((item) => item.slug), ['second-prompt', 'first-prompt']);
+});
+
 test('builds a Claude Desktop extension for the installed Runlet server', async () => {
   const bundlePath = await connections.createClaudeDesktopExtension();
   const files = unzipSync(await fs.readFile(bundlePath));
@@ -167,7 +198,7 @@ test('builds a Claude Desktop extension for the installed Runlet server', async 
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
   assert.equal(manifest.manifest_version, '0.4');
   assert.equal(manifest.name, 'runlet-local');
-  assert.equal(manifest.version, '0.9.0');
+  assert.equal(manifest.version, '0.10.0');
   assert.equal(manifest.server.type, 'node');
   assert.equal(manifest.server.entry_point, 'server/index.mjs');
   assert.deepEqual(manifest.server.mcp_config.args, ['${__dirname}/server/index.mjs']);
@@ -185,8 +216,8 @@ test('detects an installed Claude extension as connected', async () => {
     extensions: {
       'local.mcpb.runlet.runlet-local': {
         id: 'local.mcpb.runlet.runlet-local',
-        version: '0.9.0',
-        manifest: { name: 'runlet-local', version: '0.9.0' },
+        version: '0.10.0',
+        manifest: { name: 'runlet-local', version: '0.10.0' },
       },
     },
   }));
@@ -204,7 +235,7 @@ test('detects an installed Claude extension as connected', async () => {
 
 test('shows version and update commands in the CLI', async () => {
   const versionResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'version']);
-  assert.equal(versionResult.stdout.trim(), '0.9.0');
+  assert.equal(versionResult.stdout.trim(), '0.10.0');
   const helpResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'help']);
   assert.match(helpResult.stdout, /runlet update\s+Check for and install the latest release/);
 });

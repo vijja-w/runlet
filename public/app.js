@@ -8,14 +8,19 @@ let scriptInputValues = {};
 let filePath = '.';
 let selectedWorkspaceId = null;
 let connectionsLoading = false;
+let scriptSearch = '';
+let promptSearch = '';
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const icons = {
   add: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>',
   refresh: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 7A6 6 0 1 0 16 11"/><path d="M15.5 3v4h-4"/></svg>',
   remove: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6.5h11M8 3.5h4l1 3H7l1-3ZM6.5 6.5l.6 10h5.8l.6-10M8.5 9v5M11.5 9v5"/></svg>',
+  grip: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="5" r="1"/><circle cx="13" cy="5" r="1"/><circle cx="7" cy="10" r="1"/><circle cx="13" cy="10" r="1"/><circle cx="7" cy="15" r="1"/><circle cx="13" cy="15" r="1"/></svg>',
+  search: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m12.5 12.5 4 4"/></svg>',
 };
 const iconButton = (icon, label, attributes = '') => `<button class="icon-button" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" ${attributes}>${icons[icon]}</button>`;
+const dragHandle = (kind, slug) => `<button type="button" class="drag-handle" draggable="true" data-drag-kind="${kind}" data-drag-slug="${escapeHtml(slug)}" aria-label="Reorder ${kind}" title="Drag to reorder">${icons.grip}</button>`;
 const api = async (url, options = {}) => {
   const response = await fetch(url, { headers: { 'content-type': 'application/json', ...options.headers }, ...options });
   const data = await response.json();
@@ -88,27 +93,42 @@ function topbar(title, subtitle = '', controls = '', editableKind = '') {
 
 function scriptsView() {
   const cards = state.scripts.length
-    ? state.scripts.map((script) => `<article class="action-card" data-script="${escapeHtml(script.slug)}">
+    ? state.scripts.map((script) => `<article class="action-card" data-script="${escapeHtml(script.slug)}" data-order-item="${escapeHtml(script.slug)}" data-search-text="${escapeHtml(`${script.name} ${script.description}`.toLowerCase())}">
         <div class="action-copy">
           <h2>${escapeHtml(script.name)}</h2>
           <p>${escapeHtml(script.description)}</p>
         </div>
         <div class="card-actions">
           <button class="primary small open-script" data-open-script="${escapeHtml(script.slug)}">Open</button>
+          ${dragHandle('script', script.slug)}
         </div>
       </article>`).join('')
     : `<div class="empty"><h2>No Scripts yet</h2><p>Try asking: “Ask Runlet to create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
-  return `${topbar('Scripts', 'Small programs that run locally.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${cards}</div>`;
+  const search = state.scripts.length ? listSearch('script', scriptSearch) : '';
+  return `${topbar('Scripts', 'Small programs that run locally.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${search}<div class="action-list" data-order-list="scripts">${cards}</div>${noSearchResults('script')}</div>`;
 }
 
 function promptsView() {
   const cards = state.prompts.length
-    ? state.prompts.map((prompt) => `<article class="action-card" data-prompt="${escapeHtml(prompt.slug)}">
+    ? state.prompts.map((prompt) => `<article class="action-card" data-prompt="${escapeHtml(prompt.slug)}" data-order-item="${escapeHtml(prompt.slug)}" data-search-text="${escapeHtml(`${prompt.name} ${prompt.description}`.toLowerCase())}">
         <div class="action-copy"><h2>${escapeHtml(prompt.name)}</h2><p>${escapeHtml(prompt.description)}</p></div>
-        <button class="secondary small copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy</button>
+        <div class="card-actions">
+          <button class="secondary small copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy</button>
+          ${dragHandle('prompt', prompt.slug)}
+        </div>
       </article>`).join('')
     : `<div class="empty"><h2>No Prompts yet</h2><p>Try asking: “Ask Runlet to create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
-  return `${topbar('Prompts', 'Saved instructions for your AI.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${cards}</div>`;
+  const search = state.prompts.length ? listSearch('prompt', promptSearch) : '';
+  return `${topbar('Prompts', 'Saved instructions for your AI.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${search}<div class="action-list" data-order-list="prompts">${cards}</div>${noSearchResults('prompt')}</div>`;
+}
+
+function listSearch(kind, value) {
+  const label = kind === 'script' ? 'Scripts' : 'Prompts';
+  return `<label class="list-search" for="${kind}-search">${icons.search}<span class="visually-hidden">Search ${label}</span><input id="${kind}-search" type="search" value="${escapeHtml(value)}" placeholder="Search ${label}" autocomplete="off"></label>`;
+}
+
+function noSearchResults(kind) {
+  return `<div class="empty compact search-empty" data-search-empty="${kind}" hidden><p>No matching ${kind === 'script' ? 'Scripts' : 'Prompts'}.</p></div>`;
 }
 
 function scriptDetail(script) {
@@ -221,6 +241,8 @@ function bindEvents() {
     render();
   });
   document.querySelectorAll('[data-copy-prompt]').forEach((button) => button.onclick = (event) => { event.stopPropagation(); copyPrompt(button.dataset.copyPrompt); });
+  bindListControls('script');
+  bindListControls('prompt');
   document.querySelectorAll('[data-delete-kind]').forEach((button) => button.onclick = () => confirmDeleteItem(button.dataset.deleteKind, button.dataset.deleteSlug));
   document.querySelectorAll('[data-open-file]').forEach((button) => button.onclick = () => openFile(button.dataset.openFile));
   document.querySelectorAll('[data-folder]').forEach((button) => button.onclick = () => openFolder(button.dataset.folder));
@@ -238,6 +260,79 @@ function bindEvents() {
     });
     element.addEventListener('blur', saveMetadata);
   });
+}
+
+function bindListControls(kind) {
+  const plural = `${kind}s`;
+  const input = document.querySelector(`#${kind}-search`);
+  if (input) {
+    input.addEventListener('input', () => {
+      if (kind === 'script') scriptSearch = input.value;
+      else promptSearch = input.value;
+      applyListFilter(kind, input.value);
+    });
+    applyListFilter(kind, input.value);
+  }
+
+  const list = document.querySelector(`[data-order-list="${plural}"]`);
+  if (!list) return;
+  let draggedCard = null;
+  let dropped = false;
+  list.querySelectorAll('[data-drag-kind]').forEach((handle) => {
+    handle.addEventListener('click', (event) => event.stopPropagation());
+    handle.addEventListener('dragstart', (event) => {
+      draggedCard = handle.closest('[data-order-item]');
+      dropped = false;
+      draggedCard.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', handle.dataset.dragSlug);
+    });
+    handle.addEventListener('dragend', () => {
+      draggedCard?.classList.remove('dragging');
+      if (!dropped) render();
+      draggedCard = null;
+    });
+  });
+  list.querySelectorAll('[data-order-item]').forEach((card) => {
+    card.addEventListener('dragover', (event) => {
+      if (!draggedCard || card === draggedCard || card.hidden) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      const after = event.clientY > card.getBoundingClientRect().top + card.offsetHeight / 2;
+      list.insertBefore(draggedCard, after ? card.nextSibling : card);
+    });
+  });
+  list.addEventListener('drop', async (event) => {
+    if (!draggedCard) return;
+    event.preventDefault();
+    dropped = true;
+    await saveListOrder(plural, list);
+  });
+}
+
+function applyListFilter(kind, query) {
+  const normalized = String(query || '').trim().toLowerCase();
+  let matches = 0;
+  document.querySelectorAll(`[data-order-list="${kind}s"] [data-order-item]`).forEach((card) => {
+    card.hidden = normalized && !card.dataset.searchText.includes(normalized);
+    if (!card.hidden) matches += 1;
+  });
+  const empty = document.querySelector(`[data-search-empty="${kind}"]`);
+  if (empty) empty.hidden = matches > 0;
+}
+
+async function saveListOrder(kind, list) {
+  const visibleOrder = [...list.querySelectorAll('[data-order-item]:not([hidden])')].map((card) => card.dataset.orderItem);
+  const visible = new Set(visibleOrder);
+  let visibleIndex = 0;
+  const slugs = state[kind].map((item) => visible.has(item.slug) ? visibleOrder[visibleIndex++] : item.slug);
+  try {
+    state[kind] = await api(`/api/order/${kind}`, { method: 'PUT', body: JSON.stringify({ workspaceId: state.selected.id, slugs }) });
+    render();
+  } catch (error) {
+    toast(error.message, true);
+    await refresh();
+  }
 }
 
 async function loadConnections() {
