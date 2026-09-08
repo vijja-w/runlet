@@ -77,7 +77,7 @@ To make the `runlet` command use your development checkout, run `npm link`.
 The Runlet plugin supplies the local MCP connection. After installing it, start a new task in ChatGPT and ask:
 
 ```text
-@Runlet list my workspaces.
+Ask Runlet to list my workspaces.
 ```
 
 For local development without the plugin, connect the MCP server once:
@@ -92,7 +92,7 @@ Runlet uses a local stdio MCP server. It does not need to be published or expose
 
 Open **Connections** in Runlet to connect supported AI apps installed on the same computer.
 
-- ChatGPT installs the bundled local Runlet plugin. Start a new task and use `@Runlet`.
+- ChatGPT installs the bundled local Runlet plugin. Start a new task and ask Runlet to do what you need.
 - Claude opens a small local extension installer. Approve it in Claude, then ask Claude to use Runlet.
 
 Runlet does not manage AI accounts or API keys. Each AI app starts Runlet's local MCP process when it needs the tools.

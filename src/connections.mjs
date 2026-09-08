@@ -77,6 +77,29 @@ async function findClaudeDesktop() {
   return existingPath(['/usr/bin/claude-desktop', '/usr/local/bin/claude-desktop']);
 }
 
+function claudeExtensionRegistries() {
+  if (process.env.RUNLET_CLAUDE_DATA_DIR) return [path.join(path.resolve(process.env.RUNLET_CLAUDE_DATA_DIR), 'extensions-installations.json')];
+  if (process.platform === 'darwin') return [path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'extensions-installations.json')];
+  if (process.platform === 'win32') {
+    return [
+      process.env.APPDATA && path.join(process.env.APPDATA, 'Claude', 'extensions-installations.json'),
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Claude', 'extensions-installations.json'),
+    ].filter(Boolean);
+  }
+  return [path.join(os.homedir(), '.config', 'Claude', 'extensions-installations.json')];
+}
+
+async function installedClaudeExtension() {
+  for (const registryPath of claudeExtensionRegistries()) {
+    try {
+      const registry = JSON.parse(await fs.readFile(registryPath, 'utf8'));
+      const installation = Object.values(registry.extensions || {}).find((entry) => entry?.manifest?.name === 'runlet-local');
+      if (installation) return installation;
+    } catch {}
+  }
+  return null;
+}
+
 async function output(command, args) {
   try {
     const result = await run(command, args);
@@ -92,7 +115,7 @@ function codexInstallations(value) {
 
 async function codexStatus() {
   const command = await findCodexExecutable();
-  if (!command) return { id: 'codex', name: 'ChatGPT', available: false, connected: false, status: 'Not installed', invocation: '@Runlet' };
+  if (!command) return { id: 'codex', name: 'ChatGPT', available: false, connected: false, status: 'Not installed', invocation: 'Ask Runlet to…' };
   const listing = await output(command, ['plugin', 'list']);
   const installations = codexInstallations(listing);
   return {
@@ -101,25 +124,28 @@ async function codexStatus() {
     available: true,
     connected: installations.length > 0,
     status: installations.length ? 'Connected' : 'Ready to connect',
-    invocation: '@Runlet',
+    invocation: 'Ask Runlet to…',
     note: installations.length ? 'Start a new task after connecting or updating.' : 'Adds Runlet as a local ChatGPT plugin.',
   };
 }
 
-async function claudeDesktopStatus() {
-  const application = await findClaudeDesktop();
+export async function claudeDesktopStatus() {
+  const [application, installation] = await Promise.all([findClaudeDesktop(), installedClaudeExtension()]);
+  const connected = Boolean(installation);
   return {
     id: 'claude-desktop',
     name: 'Claude',
-    available: Boolean(application),
-    connected: false,
-    status: application ? 'Ready to install' : 'Not installed',
-    invocation: 'Ask Claude to use Runlet',
+    available: Boolean(application || installation),
+    connected,
+    status: connected ? 'Connected' : application ? 'Ready to install' : 'Not installed',
+    invocation: 'Ask Runlet to…',
     action: 'install',
-    actionLabel: 'Install',
-    note: application
-      ? 'Installs a local Runlet extension. Claude will ask you to approve it.'
-      : 'Install Claude to add the local Runlet extension.',
+    actionLabel: connected ? 'Reinstall' : 'Install',
+    note: connected
+      ? 'Runlet is installed as a local Claude extension. Manage or remove it in Claude settings.'
+      : application
+        ? 'Installs a local Runlet extension. Claude will ask you to approve it.'
+        : 'Install Claude to add the local Runlet extension.',
   };
 }
 
@@ -198,7 +224,7 @@ export async function connect(provider) {
     return {
       ...await claudeDesktopStatus(),
       status: 'Finish in Claude',
-      message: 'Claude opened the Runlet extension. Approve Install in Claude to finish.',
+      message: 'Approve Install in Claude, then return here and click Refresh.',
     };
   }
   throw new Error('Unsupported AI connection.');

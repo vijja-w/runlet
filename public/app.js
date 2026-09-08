@@ -97,7 +97,7 @@ function scriptsView() {
           <button class="primary small open-script" data-open-script="${escapeHtml(script.slug)}">Open</button>
         </div>
       </article>`).join('')
-    : `<div class="empty"><h2>No Scripts yet</h2><p>Ask your AI: “@Runlet create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
+    : `<div class="empty"><h2>No Scripts yet</h2><p>Ask your AI: “Ask Runlet to create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
   return `${topbar('Scripts', 'Small programs that run locally.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${cards}</div>`;
 }
 
@@ -107,7 +107,7 @@ function promptsView() {
         <div class="action-copy"><h2>${escapeHtml(prompt.name)}</h2><p>${escapeHtml(prompt.description)}</p></div>
         <button class="secondary small copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy</button>
       </article>`).join('')
-    : `<div class="empty"><h2>No Prompts yet</h2><p>Ask your AI: “@Runlet create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
+    : `<div class="empty"><h2>No Prompts yet</h2><p>Ask your AI: “Ask Runlet to create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
   return `${topbar('Prompts', 'Saved instructions for your AI.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${cards}</div>`;
 }
 
@@ -151,7 +151,7 @@ function promptDetail(prompt) {
     <form id="prompt-form" class="prompt-editor">
       <label for="prompt-content">Prompt</label>
       <textarea id="prompt-content" name="content" spellcheck="true">${escapeHtml(prompt.content)}</textarea>
-      <div class="editor-actions"><span>Use in Codex: @Runlet use the “${escapeHtml(prompt.name)}” Prompt.</span><button class="primary" type="submit">Save</button></div>
+      <div class="editor-actions"><span>Ask your AI: Ask Runlet to use the “${escapeHtml(prompt.name)}” Prompt.</span><button class="primary" type="submit">Save</button></div>
     </form>
   </div>`;
 }
