@@ -10,6 +10,7 @@ let selectedWorkspaceId = null;
 let connectionsLoading = false;
 let scriptSearch = '';
 let promptSearch = '';
+let modalEscapeHandler = null;
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const icons = {
@@ -20,7 +21,7 @@ const icons = {
   search: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m12.5 12.5 4 4"/></svg>',
 };
 const iconButton = (icon, label, attributes = '') => `<button class="icon-button" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" ${attributes}>${icons[icon]}</button>`;
-const dragHandle = (kind, slug) => `<button type="button" class="drag-handle" draggable="true" data-drag-kind="${kind}" data-drag-slug="${escapeHtml(slug)}" aria-label="Reorder ${kind}" title="Drag to reorder">${icons.grip}</button>`;
+const dragHandle = (kind, slug) => `<button type="button" class="drag-handle" data-drag-kind="${kind}" data-drag-slug="${escapeHtml(slug)}" aria-label="Reorder ${kind}" title="Drag to reorder">${icons.grip}</button>`;
 const api = async (url, options = {}) => {
   const response = await fetch(url, { headers: { 'content-type': 'application/json', ...options.headers }, ...options });
   const data = await response.json();
@@ -45,6 +46,7 @@ async function refresh() {
 
 function render() {
   if (!state.selected) return renderWelcome();
+  const collectionView = !selectedScript && !selectedPrompt && (view === 'scripts' || view === 'prompts');
   const content = selectedScript ? scriptDetail(selectedScript)
     : selectedPrompt ? promptDetail(selectedPrompt)
       : view === 'files' ? filesView() : view === 'prompts' ? promptsView() : view === 'connections' ? connectionsView() : scriptsView();
@@ -62,7 +64,7 @@ function render() {
         <button data-view="connections" class="${view === 'connections' ? 'active' : ''}">Connections</button>
       </nav>
     </aside>
-    <section class="main">${content}</section>
+    <section class="main ${collectionView ? 'collection-main' : ''}">${content}</section>
   </main><div id="modal-root"></div><div id="toast-root"></div>`;
   bindEvents();
 }
@@ -105,7 +107,7 @@ function scriptsView() {
       </article>`).join('')
     : `<div class="empty"><h2>No Scripts yet</h2><p>Try asking: “Ask Runlet to create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
   const search = state.scripts.length ? listSearch('script', scriptSearch) : '';
-  return `${topbar('Scripts', 'Small programs that run locally.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${search}<div class="action-list" data-order-list="scripts">${cards}</div>${noSearchResults('script')}</div>`;
+  return `${topbar('Scripts', 'Small programs that run locally.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page collection-page">${search}<div class="action-list" data-order-list="scripts">${cards}${noSearchResults('script')}</div></div>`;
 }
 
 function promptsView() {
@@ -119,7 +121,7 @@ function promptsView() {
       </article>`).join('')
     : `<div class="empty"><h2>No Prompts yet</h2><p>Try asking: “Ask Runlet to create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
   const search = state.prompts.length ? listSearch('prompt', promptSearch) : '';
-  return `${topbar('Prompts', 'Saved instructions for your AI.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page">${search}<div class="action-list" data-order-list="prompts">${cards}</div>${noSearchResults('prompt')}</div>`;
+  return `${topbar('Prompts', 'Saved instructions for your AI.', iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="page collection-page">${search}<div class="action-list" data-order-list="prompts">${cards}${noSearchResults('prompt')}</div></div>`;
 }
 
 function listSearch(kind, value) {
@@ -271,6 +273,14 @@ function bindListControls(kind) {
       else promptSearch = input.value;
       applyListFilter(kind, input.value);
     });
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      input.value = '';
+      if (kind === 'script') scriptSearch = '';
+      else promptSearch = '';
+      applyListFilter(kind, '');
+    });
     applyListFilter(kind, input.value);
   }
 
@@ -279,15 +289,20 @@ function bindListControls(kind) {
   let draggedCard = null;
   let dropped = false;
   list.querySelectorAll('[data-drag-kind]').forEach((handle) => {
+    const card = handle.closest('[data-order-item]');
     handle.addEventListener('click', (event) => event.stopPropagation());
-    handle.addEventListener('dragstart', (event) => {
-      draggedCard = handle.closest('[data-order-item]');
+    handle.addEventListener('pointerdown', () => { card.draggable = true; });
+    handle.addEventListener('pointerup', () => { card.draggable = false; });
+    card.addEventListener('dragstart', (event) => {
+      draggedCard = card;
       dropped = false;
+      event.dataTransfer.setDragImage(card, Math.max(20, card.offsetWidth - 22), 28);
       draggedCard.classList.add('dragging');
       event.dataTransfer.effectAllowed = 'move';
       event.dataTransfer.setData('text/plain', handle.dataset.dragSlug);
     });
-    handle.addEventListener('dragend', () => {
+    card.addEventListener('dragend', () => {
+      card.draggable = false;
       draggedCard?.classList.remove('dragging');
       if (!dropped) render();
       draggedCard = null;
@@ -299,7 +314,9 @@ function bindListControls(kind) {
       event.preventDefault();
       event.dataTransfer.dropEffect = 'move';
       const after = event.clientY > card.getBoundingClientRect().top + card.offsetHeight / 2;
-      list.insertBefore(draggedCard, after ? card.nextSibling : card);
+      const reference = after ? card.nextSibling : card;
+      if (reference === draggedCard || draggedCard.nextSibling === reference) return;
+      animateCardMove(list, draggedCard, reference);
     });
   });
   list.addEventListener('drop', async (event) => {
@@ -308,6 +325,18 @@ function bindListControls(kind) {
     dropped = true;
     await saveListOrder(plural, list);
   });
+}
+
+function animateCardMove(list, draggedCard, reference) {
+  const cards = [...list.querySelectorAll('[data-order-item]:not([hidden])')];
+  const previousTops = new Map(cards.map((card) => [card, card.getBoundingClientRect().top]));
+  list.insertBefore(draggedCard, reference);
+  for (const card of cards) {
+    if (card === draggedCard) continue;
+    const movement = previousTops.get(card) - card.getBoundingClientRect().top;
+    if (!movement) continue;
+    card.animate([{ transform: `translateY(${movement}px)` }, { transform: 'translateY(0)' }], { duration: 170, easing: 'ease-out' });
+  }
 }
 
 function applyListFilter(kind, query) {
@@ -608,8 +637,17 @@ async function removeWorkspace(id) {
 function modal(content) {
   document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true">${content}</section></div>`;
   document.querySelector('.modal-close')?.addEventListener('click', closeModal);
+  if (modalEscapeHandler) document.removeEventListener('keydown', modalEscapeHandler);
+  modalEscapeHandler = (event) => {
+    if (event.key === 'Escape') closeModal();
+  };
+  document.addEventListener('keydown', modalEscapeHandler);
 }
-function closeModal() { document.querySelector('#modal-root').innerHTML = ''; }
+function closeModal() {
+  document.querySelector('#modal-root').innerHTML = '';
+  if (modalEscapeHandler) document.removeEventListener('keydown', modalEscapeHandler);
+  modalEscapeHandler = null;
+}
 function toast(message, error = false) {
   const root = document.querySelector('#toast-root');
   root.innerHTML = `<div class="toast ${error ? 'error' : ''}">${escapeHtml(message)}</div>`;

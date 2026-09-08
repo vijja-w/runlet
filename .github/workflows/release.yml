@@ -75,7 +75,7 @@ jobs:
           export PORT=4197
           cleanup() { "$launcher" kill >/dev/null 2>&1 || true; }
           trap cleanup EXIT
-          "$launcher" version | grep '^0.10.0$'
+          "$launcher" version | grep '^0.11.0$'
           "$launcher"
           curl -fsS http://127.0.0.1:4197/api/health | grep '"ok":true'
           curl -fsS http://127.0.0.1:4197/ | grep '<title>Runlet</title>'
