@@ -355,6 +355,34 @@ nav em {
 .finder-row:focus-visible { box-shadow: 0 0 0 2px #82aaf0 inset; }
 .finder-row.dragging { opacity: .38; }
 .finder-row.drop-target { color: var(--ink); background: #dbe8fb; box-shadow: 0 0 0 2px #3974d4 inset; }
+.file-drag-preview {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  z-index: 1000;
+  width: max-content;
+  max-width: 260px;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+}
+.file-drag-preview .finder-icon { width: 22px; height: 20px; }
+.file-drag-preview > span:last-child {
+  max-width: 220px;
+  padding: 2px 6px 3px;
+  overflow: hidden;
+  color: white;
+  border-radius: 5px;
+  background: #3974d4;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .finder-row > * { min-width: 0; padding: 5px 12px; overflow: hidden; color: #747570; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .finder-row.selected > * { color: inherit; }
 .file-name-cell { display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 14px; font-weight: 520; }

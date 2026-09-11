@@ -603,9 +603,12 @@ function bindFileBrowser() {
   });
 
   let draggedPath = null;
+  let fileDragPreview = null;
   const clearFileDragState = () => {
     breadcrumbs?.classList.remove('drag-active');
     document.querySelectorAll('.drop-target, .drop-available').forEach((item) => item.classList.remove('drop-target', 'drop-available'));
+    fileDragPreview?.remove();
+    fileDragPreview = null;
   };
   breadcrumbTargets.forEach((button) => {
     button.addEventListener('dragover', (event) => {
@@ -649,6 +652,15 @@ function bindFileBrowser() {
     row.addEventListener('dragstart', (event) => {
       hideQuickTooltip();
       draggedPath = row.dataset.fileEntry;
+      fileDragPreview = document.createElement('div');
+      fileDragPreview.className = 'file-drag-preview';
+      const icon = row.querySelector('.finder-icon')?.cloneNode(true);
+      const label = document.createElement('span');
+      label.textContent = row.querySelector('.file-name')?.textContent || draggedPath.split('/').at(-1);
+      if (icon) fileDragPreview.append(icon);
+      fileDragPreview.append(label);
+      document.body.append(fileDragPreview);
+      event.dataTransfer.setDragImage(fileDragPreview, 16, 16);
       row.classList.add('dragging');
       breadcrumbs?.classList.add('drag-active');
       breadcrumbTargets.forEach((button) => button.classList.toggle('drop-available', canMoveFileToFolder(draggedPath, button.dataset.filePath)));
