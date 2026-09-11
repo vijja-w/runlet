@@ -691,8 +691,25 @@ export async function listFiles(workspaceId, relativePath = '.') {
 
 export async function readFile(workspaceId, relativePath) { const workspace = await getWorkspace(workspaceId); return fs.readFile(resolveInside(workspace.path, relativePath), 'utf8'); }
 export async function writeFile(workspaceId, relativePath, content) { const workspace = await getWorkspace(workspaceId); const target = resolveInside(workspace.path, relativePath); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); return { path: relativePath }; }
-export async function makeDirectory(workspaceId, relativePath) { const workspace = await getWorkspace(workspaceId); await fs.mkdir(resolveInside(workspace.path, relativePath), { recursive: true }); return { path: relativePath }; }
-export async function moveFile(workspaceId, from, to) { const workspace = await getWorkspace(workspaceId); const target = resolveInside(workspace.path, to); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.rename(resolveInside(workspace.path, from), target); return { path: to }; }
+export async function makeDirectory(workspaceId, relativePath) {
+  const workspace = await getWorkspace(workspaceId);
+  const target = resolveInside(workspace.path, relativePath);
+  if (target === path.resolve(workspace.path)) throw new Error('Choose a name for the new folder.');
+  if (await fs.access(target).then(() => true).catch(() => false)) throw new Error('A file or folder with that name already exists.');
+  await fs.mkdir(target, { recursive: true });
+  return { path: relativePath };
+}
+export async function moveFile(workspaceId, from, to) {
+  const workspace = await getWorkspace(workspaceId);
+  const source = resolveInside(workspace.path, from);
+  const target = resolveInside(workspace.path, to);
+  if (source === path.resolve(workspace.path)) throw new Error('The workspace folder cannot be moved.');
+  if (target === source || target.startsWith(`${source}${path.sep}`)) throw new Error('A folder cannot be moved into itself.');
+  if (await fs.access(target).then(() => true).catch(() => false)) throw new Error('A file or folder with that name already exists there.');
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.rename(source, target);
+  return { path: to };
+}
 export async function deleteFile(workspaceId, relativePath) { const workspace = await getWorkspace(workspaceId); const target = resolveInside(workspace.path, relativePath); if (target === path.resolve(workspace.path)) throw new Error('Cannot delete a workspace root.'); await fs.rm(target, { recursive: true }); }
 
 export async function listDirectories(folderPath = os.homedir()) {

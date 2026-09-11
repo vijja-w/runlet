@@ -57,6 +57,18 @@ test('creates a workspace with separate Scripts and Prompts folders', async () =
   assert.equal((await fs.stat(path.join(workspace.path, 'prompts'))).isDirectory(), true);
 });
 
+test('creates folders and safely moves files within a workspace', async () => {
+  const current = await runlet.getCurrentWorkspace();
+  await runlet.makeDirectory(current.id, 'Documents');
+  await runlet.writeFile(current.id, 'note.txt', 'hello');
+  await runlet.moveFile(current.id, 'note.txt', 'Documents/note.txt');
+  assert.deepEqual((await runlet.listFiles(current.id, 'Documents')).map((item) => item.name), ['note.txt']);
+  await assert.rejects(runlet.makeDirectory(current.id, 'Documents'), /already exists/i);
+  await assert.rejects(runlet.moveFile(current.id, 'Documents', 'Documents/Archive/Documents'), /into itself/i);
+  await assert.rejects(runlet.moveFile(current.id, 'Documents/note.txt', 'Documents/note.txt'), /into itself/i);
+  await runlet.deleteFile(current.id, 'Documents');
+});
+
 test('requires unique workspace names and renames without deleting folders', async () => {
   const first = await runlet.getCurrentWorkspace();
   const secondFolder = path.join(temporaryRoot, 'second-workspace');
