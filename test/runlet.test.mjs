@@ -69,6 +69,42 @@ test('creates folders and safely moves files within a workspace', async () => {
   await runlet.deleteFile(current.id, 'Documents');
 });
 
+test('configures, pauses, repairs, and discovers Inboxes safely', async () => {
+  const current = await runlet.getCurrentWorkspace();
+  await runlet.makeDirectory(current.id, 'Invoices');
+  await runlet.writeFile(current.id, 'Invoices/invoice-1.txt', 'Invoice 1');
+
+  const ready = await runlet.setupInbox(current.id, 'Invoices');
+  assert.equal(ready.status, 'ready');
+  assert.equal(ready.enabled, true);
+  assert.equal(JSON.parse(await runlet.readFile(current.id, 'Invoices/runlet.json')).kind, 'inbox');
+  assert.equal(await runlet.readFile(current.id, 'Invoices/data.csv'), 'source_file\n');
+  await runlet.makeDirectory(current.id, 'Invoices/processed/not-an-inbox');
+  await runlet.writeFile(current.id, 'Invoices/processed/not-an-inbox/runlet.json', JSON.stringify({ kind: 'inbox' }));
+
+  const discovered = await runlet.listInboxes(current.id);
+  assert.deepEqual(discovered.map((inbox) => inbox.path), ['Invoices']);
+  assert.deepEqual(discovered[0].pendingFiles, ['invoice-1.txt']);
+  assert.equal(discovered[0].processedPath, path.join('Invoices', 'processed'));
+  assert.equal(discovered[0].needsReviewPath, path.join('Invoices', 'needs-review'));
+
+  await runlet.deleteFile(current.id, 'Invoices/data.csv');
+  const listed = (await runlet.listFiles(current.id)).find((item) => item.name === 'Invoices');
+  assert.equal(listed.inbox.status, 'attention');
+  assert.equal(listed.inbox.repairable, true);
+
+  await runlet.setInboxEnabled(current.id, 'Invoices', false);
+  assert.deepEqual(await runlet.listInboxes(current.id), []);
+  assert.equal((await runlet.listInboxes(current.id, { includeDisabled: true }))[0].enabled, false);
+  await assert.rejects(runlet.setInboxEnabled(current.id, 'Invoices', true), /needs attention/i);
+
+  const repaired = await runlet.setupInbox(current.id, 'Invoices', { repair: true });
+  assert.equal(repaired.status, 'ready');
+  await assert.rejects(runlet.setupInbox(current.id, 'scripts'), /Scripts and Prompts/i);
+  await assert.rejects(runlet.setupInbox(current.id, 'Invoices/processed'), /result folders/i);
+  await runlet.deleteFile(current.id, 'Invoices');
+});
+
 test('requires unique workspace names and renames without deleting folders', async () => {
   const first = await runlet.getCurrentWorkspace();
   const secondFolder = path.join(temporaryRoot, 'second-workspace');
@@ -289,7 +325,14 @@ test('shows version and update commands in the CLI', async () => {
   assert.equal(versionResult.stdout.trim(), '0.18.0');
   const helpResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'help']);
   assert.match(helpResult.stdout, /runlet update\s+Check for and install the latest release/);
+  assert.match(helpResult.stdout, /runlet tools\s+Show the tools provided to connected AI apps/);
   assert.match(helpResult.stdout, /runlet libraries\s+Show the JavaScript APIs available to Scripts/);
+  const toolsResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'tools']);
+  assert.match(toolsResult.stdout, /Runlet tools provided to connected AI apps/);
+  assert.match(toolsResult.stdout, /list_inboxes\s+List enabled Runlet Inboxes/);
+  assert.match(toolsResult.stdout, /run_script\s+Run a local Script/);
+  assert.match(toolsResult.stdout, /create_prompt\s+Create a reusable provider-neutral Prompt/);
+  assert.match(toolsResult.stdout, /only explicitly registered Runlet workspaces/);
   const librariesResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'libraries']);
   assert.match(librariesResult.stdout, /pdf\.extractText/);
   assert.match(librariesResult.stdout, /csv\.parse \/ stringify/);

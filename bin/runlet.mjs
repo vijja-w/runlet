@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { formatMcpTools } from '../src/mcp-tools.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeDir = process.env.RUNLET_STATE_DIR
@@ -111,6 +112,10 @@ Safe JavaScript globals:
 
 Scripts cannot import packages or use Node.js filesystem, process, shell, or child-process APIs.
 Full reference: ${path.join(appRoot, 'SCRIPTING.md')}`);
+}
+
+function tools() {
+  console.log(formatMcpTools());
 }
 
 async function kill() {
@@ -277,9 +282,10 @@ try {
   else if (command === 'uninstall') await uninstall();
   else if (command === 'update') await update();
   else if (command === 'libraries' || command === 'script-api') libraries();
+  else if (command === 'tools') tools();
   else if (command === 'version' || command === '--version' || command === '-v') await version();
   else if (command === 'help' || command === '--help' || command === '-h') {
-    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet version   Show the installed version\n  runlet update    Check for and install the latest release\n  runlet libraries Show the JavaScript APIs available to Scripts\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
+    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet version   Show the installed version\n  runlet update    Check for and install the latest release\n  runlet tools     Show the tools provided to connected AI apps\n  runlet libraries Show the JavaScript APIs available to Scripts\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
   } else {
     console.error(`Unknown command: ${command}\nRun “runlet help” for available commands.`);
     process.exitCode = 1;

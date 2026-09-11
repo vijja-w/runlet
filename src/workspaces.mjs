@@ -9,6 +9,15 @@ const stateDir = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_
 const statePath = path.join(stateDir, 'state.json');
 const legacyStatePath = path.join(appRoot, '.workshop', 'state.json');
 const workerPath = path.join(appRoot, 'src', 'action-worker.mjs');
+const inboxDefaults = Object.freeze({
+  kind: 'inbox',
+  version: 1,
+  enabled: true,
+  instructions: 'INSTRUCTIONS.md',
+  data: 'data.csv',
+  processed: 'processed',
+  needsReview: 'needs-review',
+});
 
 function normalizeState(state) {
   const usedNames = new Set();
@@ -161,6 +170,145 @@ export function resolveInside(workspacePath, relativePath = '.') {
   const target = path.resolve(root, String(relativePath).replace(/^[/\\]+/, ''));
   if (target !== root && !target.startsWith(`${root}${path.sep}`)) throw new Error('Path must stay inside the workspace.');
   return target;
+}
+
+function inboxName(value, fallback) {
+  const name = typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  if (name === '.' || name === '..' || path.basename(name) !== name || /[/\\]/.test(name)) throw new Error('Inbox settings contain an invalid filename.');
+  return name;
+}
+
+function normalizeInboxConfig(value) {
+  if (!value || value.kind !== 'inbox') return null;
+  return {
+    kind: 'inbox',
+    version: 1,
+    enabled: value.enabled !== false,
+    instructions: inboxName(value.instructions, inboxDefaults.instructions),
+    data: inboxName(value.data, inboxDefaults.data),
+    processed: inboxName(value.processed, inboxDefaults.processed),
+    needsReview: inboxName(value.needsReview, inboxDefaults.needsReview),
+  };
+}
+
+async function readInboxManifest(directory) {
+  const target = path.join(directory, 'runlet.json');
+  let source;
+  try { source = await fs.readFile(target, 'utf8'); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return { exists: false, config: null };
+    throw error;
+  }
+  try {
+    const config = normalizeInboxConfig(JSON.parse(source));
+    return config
+      ? { exists: true, config }
+      : { exists: true, config: null, reason: 'This folder already uses runlet.json for another Runlet item.' };
+  } catch (error) {
+    return { exists: true, config: null, reason: error instanceof SyntaxError ? 'This folder has an unreadable runlet.json file.' : error.message };
+  }
+}
+
+async function writeInboxManifest(directory, config, { replace = true } = {}) {
+  const target = path.join(directory, 'runlet.json');
+  const source = `${JSON.stringify(config, null, 2)}\n`;
+  if (!replace) {
+    await fs.writeFile(target, source, { flag: 'wx' });
+    return;
+  }
+  const temporary = `${target}.tmp-${uniqueId()}`;
+  await fs.writeFile(temporary, source);
+  try { await fs.rename(temporary, target); }
+  catch (error) { await fs.rm(temporary, { force: true }); throw error; }
+}
+
+async function inboxProtectionReason(workspaceRoot, relativePath) {
+  const relative = path.relative(workspaceRoot, resolveInside(workspaceRoot, relativePath));
+  if (!relative) return 'The workspace folder cannot become an Inbox.';
+  const parts = relative.split(path.sep);
+  if (parts[0] === 'scripts' || parts[0] === 'prompts') return 'Runlet Scripts and Prompts cannot become Inboxes.';
+  for (let index = 1; index < parts.length; index += 1) {
+    const ancestor = path.join(workspaceRoot, ...parts.slice(0, index));
+    const manifest = await readInboxManifest(ancestor);
+    if (!manifest.config) continue;
+    if ([manifest.config.processed, manifest.config.needsReview].includes(parts[index])) return 'Inbox result folders cannot become Inboxes.';
+  }
+  return null;
+}
+
+async function inboxIssues(directory, config) {
+  const expected = [
+    [config.instructions, 'file'],
+    [config.data, 'file'],
+    [config.processed, 'directory'],
+    [config.needsReview, 'directory'],
+  ];
+  const issues = [];
+  for (const [name, expectedType] of expected) {
+    const stat = await fs.stat(path.join(directory, name)).catch(() => null);
+    if (!stat) issues.push({ name, type: 'missing', reason: `${name} is missing.` });
+    else if (expectedType === 'file' ? !stat.isFile() : !stat.isDirectory()) issues.push({ name, type: 'conflict', reason: `${name} is not a ${expectedType === 'file' ? 'file' : 'folder'}.` });
+  }
+  return issues;
+}
+
+async function describeInboxFolder(workspace, relativePath) {
+  const directory = resolveInside(workspace.path, relativePath);
+  const protection = await inboxProtectionReason(workspace.path, relativePath);
+  if (protection) return { canConfigure: false, configured: false, enabled: false, ready: false, status: 'protected', reason: protection, issues: [] };
+  const manifest = await readInboxManifest(directory);
+  if (!manifest.config) return {
+    canConfigure: !manifest.exists,
+    configured: false,
+    enabled: false,
+    ready: false,
+    status: manifest.exists ? 'unavailable' : 'off',
+    reason: manifest.reason || null,
+    issues: [],
+  };
+  const config = manifest.config;
+  const issues = await inboxIssues(directory, config);
+  return {
+    canConfigure: true,
+    configured: true,
+    enabled: config.enabled,
+    ready: config.enabled && issues.length === 0,
+    status: !config.enabled ? 'off' : issues.length ? 'attention' : 'ready',
+    reason: issues[0]?.reason || null,
+    issues,
+    repairable: issues.length > 0 && issues.every((issue) => issue.type === 'missing'),
+    instructionsPath: path.join(relativePath, config.instructions),
+    dataPath: path.join(relativePath, config.data),
+    processedPath: path.join(relativePath, config.processed),
+    needsReviewPath: path.join(relativePath, config.needsReview),
+    instructionsAvailable: !issues.some((issue) => issue.name === config.instructions),
+    dataAvailable: !issues.some((issue) => issue.name === config.data),
+  };
+}
+
+async function ensureInboxArtifacts(directory, config) {
+  const artifacts = [
+    [config.instructions, 'file', '# Inbox instructions\n\nDescribe what Runlet should extract from each file and how the results should be recorded.\n'],
+    [config.data, 'file', 'source_file\n'],
+    [config.processed, 'directory'],
+    [config.needsReview, 'directory'],
+  ];
+  const created = [];
+  try {
+    for (const [name, expectedType, content] of artifacts) {
+      const target = path.join(directory, name);
+      const stat = await fs.stat(target).catch(() => null);
+      if (stat && (expectedType === 'file' ? !stat.isFile() : !stat.isDirectory())) throw new Error(`${name} already exists but is not a ${expectedType === 'file' ? 'file' : 'folder'}.`);
+      if (stat) continue;
+      if (expectedType === 'file') await fs.writeFile(target, content);
+      else await fs.mkdir(target);
+      created.push(target);
+    }
+  } catch (error) {
+    await Promise.all(created.reverse().map((target) => fs.rm(target, { recursive: true, force: true })));
+    throw error;
+  }
+  return created;
 }
 
 function parseReadme(markdown, fallbackName) {
@@ -678,6 +826,89 @@ export async function readActionInput(workspaceId, slug, name) {
   return { data, path: path.join('actions', slug, 'inputs', safeName) };
 }
 
+export async function setupInbox(workspaceId, relativePath, { repair = false } = {}) {
+  const workspace = await getWorkspace(workspaceId);
+  const directory = resolveInside(workspace.path, relativePath);
+  const stat = await fs.stat(directory).catch(() => null);
+  if (!stat?.isDirectory()) throw new Error('Choose a folder to make an Inbox.');
+  const protection = await inboxProtectionReason(workspace.path, relativePath);
+  if (protection) throw new Error(protection);
+  const manifest = await readInboxManifest(directory);
+  if (manifest.exists && !manifest.config) throw new Error(manifest.reason || 'This folder cannot become an Inbox.');
+
+  if (manifest.config) {
+    const issues = await inboxIssues(directory, manifest.config);
+    if (issues.length && !repair) throw new Error(`Inbox needs attention: ${issues.map((issue) => issue.reason).join(' ')}`);
+    if (repair) await ensureInboxArtifacts(directory, manifest.config);
+    await writeInboxManifest(directory, { ...manifest.config, enabled: true });
+    return describeInboxFolder(workspace, relativePath);
+  }
+
+  const config = { ...inboxDefaults };
+  const created = await ensureInboxArtifacts(directory, config);
+  try { await writeInboxManifest(directory, config, { replace: false }); }
+  catch (error) {
+    await Promise.all(created.reverse().map((target) => fs.rm(target, { recursive: true, force: true })));
+    throw error?.code === 'EEXIST' ? new Error('runlet.json was created by another action. Refresh and try again.') : error;
+  }
+  return describeInboxFolder(workspace, relativePath);
+}
+
+export async function setInboxEnabled(workspaceId, relativePath, enabled) {
+  if (enabled) return setupInbox(workspaceId, relativePath);
+  const workspace = await getWorkspace(workspaceId);
+  const directory = resolveInside(workspace.path, relativePath);
+  const manifest = await readInboxManifest(directory);
+  if (!manifest.config) throw new Error('This folder is not an Inbox.');
+  await writeInboxManifest(directory, { ...manifest.config, enabled: false });
+  return describeInboxFolder(workspace, relativePath);
+}
+
+async function inboxPendingFiles(directory, config) {
+  const reserved = new Set(['runlet.json', config.instructions, config.data]);
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  return entries.filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !reserved.has(entry.name)).map((entry) => entry.name).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
+export async function listInboxes(workspaceId, { includeDisabled = false } = {}) {
+  const workspace = await getWorkspace(workspaceId);
+  const inboxes = [];
+  async function walk(relativePath = '.', skipNames = new Set()) {
+    const directory = resolveInside(workspace.path, relativePath);
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'node_modules' || skipNames.has(entry.name)) continue;
+      if (relativePath === '.' && (entry.name === 'scripts' || entry.name === 'prompts')) continue;
+      const childPath = relativePath === '.' ? entry.name : path.join(relativePath, entry.name);
+      const childDirectory = path.join(directory, entry.name);
+      const manifest = await readInboxManifest(childDirectory);
+      if (manifest.config) {
+        const description = await describeInboxFolder(workspace, childPath);
+        if (includeDisabled || description.enabled) {
+          inboxes.push({
+            path: childPath,
+            name: entry.name,
+            enabled: description.enabled,
+            ready: description.ready,
+            status: description.status,
+            reason: description.reason,
+            issues: description.issues,
+            instructionsPath: description.instructionsPath,
+            dataPath: description.dataPath,
+            processedPath: description.processedPath,
+            needsReviewPath: description.needsReviewPath,
+            pendingFiles: await inboxPendingFiles(childDirectory, manifest.config),
+          });
+        }
+      }
+      const blockedChildren = manifest.config ? new Set([manifest.config.processed, manifest.config.needsReview]) : new Set();
+      await walk(childPath, blockedChildren);
+    }
+  }
+  await walk();
+  return inboxes.sort((left, right) => left.path.localeCompare(right.path));
+}
+
 export async function listFiles(workspaceId, relativePath = '.') {
   const workspace = await getWorkspace(workspaceId);
   const directory = resolveInside(workspace.path, relativePath);
@@ -685,7 +916,15 @@ export async function listFiles(workspaceId, relativePath = '.') {
   return Promise.all(entries.filter((entry) => !['.git', 'node_modules', '.DS_Store'].includes(entry.name)).map(async (entry) => {
     const itemPath = path.join(directory, entry.name);
     const stat = await fs.stat(itemPath);
-    return { name: entry.name, path: path.relative(workspace.path, itemPath) || '.', type: entry.isDirectory() ? 'directory' : 'file', size: stat.size, modifiedAt: stat.mtime.toISOString() };
+    const itemRelativePath = path.relative(workspace.path, itemPath) || '.';
+    return {
+      name: entry.name,
+      path: itemRelativePath,
+      type: entry.isDirectory() ? 'directory' : 'file',
+      size: stat.size,
+      modifiedAt: stat.mtime.toISOString(),
+      inbox: entry.isDirectory() ? await describeInboxFolder(workspace, itemRelativePath) : null,
+    };
   }));
 }
 

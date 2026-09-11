@@ -53,6 +53,8 @@ app.post('/api/files/open', route(async ({ body }) => {
   await openLocalFile(target);
   return { opened: body.path };
 }));
+app.post('/api/inboxes', route(async ({ body }) => workshop.setupInbox(body.workspaceId, body.path, { repair: Boolean(body.repair) })));
+app.patch('/api/inboxes', route(async ({ body }) => workshop.setInboxEnabled(body.workspaceId, body.path, Boolean(body.enabled))));
 app.post('/api/scripts/:slug/run', route(async ({ params, body }) => workshop.runScript(body.workspaceId, params.slug, body.input || {})));
 app.get('/api/scripts/:slug/results', route(async ({ params, query }) => workshop.getScriptResults(query.workspaceId, params.slug)));
 app.patch('/api/scripts/:slug', route(async ({ params, body }) => workshop.updateScriptMetadata(body.workspaceId, params.slug, body)));

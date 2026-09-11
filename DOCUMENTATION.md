@@ -34,6 +34,7 @@ Installed copies keep their local registry under `~/.local/state/runlet` on macO
 - `runlet status` reports whether Runlet is running.
 - `runlet version` prints the installed version.
 - `runlet update` installs the latest published release when needed.
+- `runlet tools` lists the workspace tools provided to connected AI apps.
 - `runlet libraries` lists the APIs available to Script JavaScript.
 - `runlet kill` stops Runlet.
 - `runlet open` starts or opens Runlet.
@@ -61,7 +62,35 @@ prompts/
     └── PROMPT.md
 ```
 
-The Files area lets someone intentionally inspect workspace files. Script and Prompt pages keep paths and implementation details out of the normal workflow.
+The Files area lets someone intentionally inspect workspace files, move them between folders, and enable ordinary folders as Inboxes. Script and Prompt pages keep paths and implementation details out of the normal workflow.
+
+## Inboxes
+
+An Inbox is an explicitly enabled folder whose loose files are waiting for a connected AI to process. Turning on Inbox for the first time creates or adopts this structure without replacing existing files:
+
+```text
+runlet.json
+INSTRUCTIONS.md
+data.csv
+processed/
+needs-review/
+```
+
+`runlet.json` identifies the folder as an Inbox. `INSTRUCTIONS.md` tells the AI what to do, and `data.csv` stores extracted records. Successful source files belong in `processed/`; files requiring human judgment belong in `needs-review/`.
+
+Turning an Inbox off preserves all of its files but removes it from normal AI processing. If a required item is deleted, the Inbox remains enabled but pauses with a warning until it is repaired. Runlet's own `scripts/` and `prompts/` areas cannot become Inboxes.
+
+## Tools provided to AI apps
+
+Runlet connects to compatible AI apps through MCP. It provides tools for registered workspaces, files and Inboxes, Scripts, and Prompts. The AI can only access folders that have been explicitly registered as Runlet workspaces.
+
+To see the complete current list with a description of each tool, run:
+
+```bash
+runlet tools
+```
+
+This list is generated from the same descriptions used by Runlet's MCP server, so it shows the actual interface provided to connected AI apps. It is different from `runlet libraries`, which describes the limited APIs available to JavaScript while a Script runs.
 
 ## Scripts
 

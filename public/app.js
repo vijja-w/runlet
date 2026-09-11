@@ -32,6 +32,9 @@ const icons = {
   forward: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 4.5 5.5 5.5-5.5 5.5"/></svg>',
   newFolder: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 6.5h6l1.7-2h2.3l1.5 2h3.5v9H2.5z"/><path d="M10 9v4M8 11h4"/></svg>',
   sort: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5h10M5 10h7M5 15h4"/><path d="m14 13 2 2 2-2"/></svg>',
+  instructions: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 2.5h8l4 4v11H4z"/><path d="M12 2.5v4h4M7 10h6M7 13h6"/></svg>',
+  data: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="1"/><path d="M2.5 8h15M8 3.5v13M13 3.5v13"/></svg>',
+  warning: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2.5 8 14H2z"/><path d="M10 7v4M10 14h.01"/></svg>',
 };
 const iconButton = (icon, label, attributes = '') => `<button class="icon-button" aria-label="${escapeHtml(label)}" data-tooltip="${escapeHtml(label)}" ${attributes}>${icons[icon]}</button>`;
 const dragHandle = (kind, slug) => `<button type="button" class="drag-handle" data-drag-kind="${kind}" data-drag-slug="${escapeHtml(slug)}" aria-label="Reorder ${kind}" data-tooltip="Drag to reorder">${icons.grip}</button>`;
@@ -198,16 +201,15 @@ function promptDetail(prompt) {
 
 function filesView() {
   const rows = sortFiles(state.files).map((file) => {
-    const kind = fileKind(file);
     return `<div class="finder-row ${file.type === 'directory' ? 'directory-row' : ''} ${selectedFilePath === file.path ? 'selected' : ''}" role="row" tabindex="0" draggable="true" data-file-entry="${escapeHtml(file.path)}" data-file-type="${file.type}" data-search-text="${escapeHtml(file.name.toLowerCase())}">
       <span class="file-name-cell" role="gridcell">${fileIcon(file)}<span class="file-name">${escapeHtml(file.name)}</span></span>
       <time role="gridcell" datetime="${escapeHtml(file.modifiedAt)}">${escapeHtml(formatFileDate(file.modifiedAt))}</time>
       <small role="gridcell">${file.type === 'directory' ? '--' : formatSize(file.size)}</small>
-      <span class="file-kind" role="gridcell">${escapeHtml(kind)}</span>
+      ${inboxCell(file)}
     </div>`;
   }).join('');
   const currentName = filePath === '.' ? state.selected.name : filePath.split('/').filter(Boolean).at(-1);
-  const sortLabels = { none: 'None', name: 'Name', kind: 'Kind', modified: 'Date Modified', size: 'Size' };
+  const sortLabels = { none: 'None', name: 'Name', inbox: 'Inbox', kind: 'Kind', modified: 'Date Modified', size: 'Size' };
   return `<header class="files-topbar">
     <div class="files-nav-group">
       ${iconButton('back', 'Back', `id="files-back" ${fileHistoryIndex === 0 ? 'disabled' : ''}`)}
@@ -224,12 +226,32 @@ function filesView() {
   <div class="finder-page">
     <div class="finder-table" role="grid" aria-label="Files in ${escapeHtml(currentName)}">
       <div class="finder-header" role="row">
-        ${fileHeaderButton('name', 'Name')}${fileHeaderButton('modified', 'Date Modified')}${fileHeaderButton('size', 'Size')}${fileHeaderButton('kind', 'Kind')}
+        ${fileHeaderButton('name', 'Name')}${fileHeaderButton('modified', 'Date Modified')}${fileHeaderButton('size', 'Size')}${inboxHeader()}
       </div>
       <div class="finder-body">${rows || `<div class="file-empty"><p>This folder is empty.</p>${iconButton('newFolder', 'New Folder', 'data-empty-new-folder')}</div>`}<div class="file-empty search-file-empty" hidden><p>No files match your search.</p></div></div>
     </div>
     <footer class="finder-status"><span data-file-count>${state.files.length} ${state.files.length === 1 ? 'item' : 'items'}</span><span>Drag an item onto a folder to move it</span></footer>
   </div>`;
+}
+
+function inboxCell(file) {
+  if (file.type !== 'directory') return '<span class="inbox-cell" role="gridcell"></span>';
+  const inbox = file.inbox || {};
+  if (!inbox.canConfigure && !inbox.configured) {
+    return `<span class="inbox-cell inbox-protected" role="gridcell"><span data-tooltip="${escapeHtml(inbox.reason || 'This folder cannot become an Inbox.')}">--</span></span>`;
+  }
+  const enabled = Boolean(inbox.enabled);
+  const controls = inbox.configured ? `${inbox.instructionsAvailable ? iconButton('instructions', 'Open Instructions', `data-open-inbox-file="${escapeHtml(inbox.instructionsPath)}"`) : ''}${inbox.dataAvailable ? iconButton('data', 'Open Data', `data-open-inbox-file="${escapeHtml(inbox.dataPath)}"`) : ''}${inbox.issues?.length ? iconButton('warning', inbox.reason || 'Inbox needs attention', `data-repair-inbox="${escapeHtml(file.path)}"`) : ''}` : '';
+  return `<span class="inbox-cell" role="gridcell">
+    <button class="inbox-switch ${enabled ? 'on' : ''}" role="switch" aria-checked="${enabled}" aria-label="${enabled ? 'Turn off' : 'Turn on'} Inbox for ${escapeHtml(file.name)}" data-inbox-toggle="${escapeHtml(file.path)}" data-inbox-configured="${Boolean(inbox.configured)}" data-inbox-has-issues="${Boolean(inbox.issues?.length)}"><span></span></button>
+    ${controls}
+  </span>`;
+}
+
+function inboxHeader() {
+  const active = fileSort === 'inbox';
+  const arrow = active ? `<svg class="sort-direction ${fileSortDirection}" viewBox="0 0 16 10" aria-hidden="true"><path d="m3 7 5-5 5 5"/></svg>` : '';
+  return `<div class="inbox-column-header" role="columnheader" aria-sort="${active ? fileSortDirection : 'none'}"><button data-sort-column="inbox">Inbox${arrow}</button><button class="inbox-info" aria-label="About Inboxes" data-tooltip="About Inboxes" data-inbox-info>i</button></div>`;
 }
 
 function fileHeaderButton(sort, label) {
@@ -245,6 +267,10 @@ function sortFiles(files) {
     let comparison = 0;
     if (fileSort === 'name') comparison = left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' });
     if (fileSort === 'kind') comparison = fileKind(left).localeCompare(fileKind(right)) || left.name.localeCompare(right.name);
+    if (fileSort === 'inbox') {
+      const rank = (file) => file.inbox?.enabled ? 0 : file.inbox?.configured ? 1 : file.type === 'directory' && file.inbox?.canConfigure ? 2 : 3;
+      comparison = rank(left) - rank(right) || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' });
+    }
     if (fileSort === 'modified') comparison = new Date(left.modifiedAt) - new Date(right.modifiedAt);
     if (fileSort === 'size') comparison = left.size - right.size;
     return comparison * direction;
@@ -590,6 +616,28 @@ function bindFileBrowser() {
   document.querySelector('#files-forward')?.addEventListener('click', () => visitFileHistory(fileHistoryIndex + 1));
   document.querySelector('#new-folder')?.addEventListener('click', newFolderModal);
   document.querySelector('[data-empty-new-folder]')?.addEventListener('click', newFolderModal);
+  document.querySelector('[data-inbox-info]')?.addEventListener('click', inboxInfoModal);
+  document.querySelectorAll('[data-inbox-toggle]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void toggleInbox(button.dataset.inboxToggle, button.getAttribute('aria-checked') === 'true', button.dataset.inboxConfigured === 'true', button.dataset.inboxHasIssues === 'true');
+  }));
+  document.querySelectorAll('[data-open-inbox-file]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void openFile(button.dataset.openInboxFile);
+  }));
+  document.querySelectorAll('[data-repair-inbox]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    inboxRepairModal(button.dataset.repairInbox);
+  }));
+  document.querySelectorAll('.inbox-cell button').forEach((button) => {
+    const row = button.closest('[data-file-entry]');
+    const restoreDrag = () => { if (row) row.draggable = true; };
+    button.addEventListener('pointerdown', () => {
+      if (row) row.draggable = false;
+      document.addEventListener('pointerup', restoreDrag, { once: true });
+      document.addEventListener('pointercancel', restoreDrag, { once: true });
+    });
+  });
   document.querySelectorAll('[data-file-sort]').forEach((button) => button.onclick = () => {
     fileSort = button.dataset.fileSort;
     fileSortDirection = 'ascending';
@@ -752,6 +800,69 @@ function canMoveFileToFolder(from, folder) {
   const name = from.split('/').at(-1);
   const to = folder === '.' ? name : `${folder}/${name}`;
   return from !== to && !folder.startsWith(`${from}/`);
+}
+
+function inboxInfoModal() {
+  modal(`<div class="modal-head"><h2>Inboxes</h2><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
+    <div class="inbox-explanation"><p>Inboxes are folders Runlet can process.</p><p>Loose files wait in the folder. Completed files move to <b>processed</b>, and uncertain files move to <b>needs-review</b>.</p><p>Enabled Inboxes appear to your connected AI apps. Inboxes needing attention are paused until repaired.</p></div>`);
+}
+
+async function reloadCurrentFiles() {
+  state.files = await api(`/api/files?workspaceId=${encodeURIComponent(state.selected.id)}&path=${encodeURIComponent(filePath)}`);
+  render();
+}
+
+async function toggleInbox(path, enabled, configured, hasIssues) {
+  if (enabled) {
+    try {
+      await api('/api/inboxes', { method: 'PATCH', body: JSON.stringify({ workspaceId: state.selected.id, path, enabled: false }) });
+      await reloadCurrentFiles();
+      toast(`${path.split('/').at(-1)} is no longer an active Inbox.`);
+    } catch (error) { toast(error.message, true); }
+    return;
+  }
+  if (!configured) return inboxSetupModal(path);
+  if (hasIssues) return inboxRepairModal(path);
+  try {
+    await api('/api/inboxes', { method: 'PATCH', body: JSON.stringify({ workspaceId: state.selected.id, path, enabled: true }) });
+    await reloadCurrentFiles();
+    toast(`${path.split('/').at(-1)} is now an active Inbox.`);
+  } catch (error) { toast(error.message, true); }
+}
+
+function inboxSetupModal(path) {
+  const name = path.split('/').at(-1);
+  modal(`<div class="modal-head"><h2>Make ${escapeHtml(name)} an Inbox?</h2><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
+    <div class="inbox-setup"><p>Runlet will add the following to this folder:</p><ul class="inbox-file-list"><li><code>runlet.json</code></li><li><code>INSTRUCTIONS.md</code></li><li><code>data.csv</code></li><li><code>processed/</code></li><li><code>needs-review/</code></li></ul><div class="confirmation-actions"><button class="secondary modal-close-action">Cancel</button><button class="primary" data-confirm-inbox>Create Inbox</button></div></div>`);
+  document.querySelector('.modal-close-action').onclick = closeModal;
+  document.querySelector('[data-confirm-inbox]').onclick = (event) => performInboxSetup(path, false, event.currentTarget);
+}
+
+function inboxRepairModal(path) {
+  const file = state.files.find((item) => item.path === path);
+  const inbox = file?.inbox;
+  if (!inbox?.issues?.length) return;
+  const repairable = Boolean(inbox.repairable);
+  modal(`<div class="modal-head"><h2>Inbox needs attention</h2><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
+    <div class="inbox-setup"><p>${escapeHtml(inbox.issues.map((issue) => issue.reason).join(' '))}</p><p>${repairable ? 'Runlet can recreate the missing items without replacing anything else.' : 'Rename the conflicting item, then refresh and try again.'}</p><div class="confirmation-actions"><button class="secondary modal-close-action">Close</button>${repairable ? '<button class="primary" data-repair-confirm>Repair Inbox</button>' : ''}</div></div>`);
+  document.querySelector('.modal-close-action').onclick = closeModal;
+  document.querySelector('[data-repair-confirm]')?.addEventListener('click', (event) => performInboxSetup(path, true, event.currentTarget));
+}
+
+async function performInboxSetup(path, repair, button) {
+  const old = button.textContent;
+  button.disabled = true;
+  button.textContent = repair ? 'Repairing…' : 'Creating…';
+  try {
+    await api('/api/inboxes', { method: 'POST', body: JSON.stringify({ workspaceId: state.selected.id, path, repair }) });
+    closeModal();
+    await reloadCurrentFiles();
+    toast(`${path.split('/').at(-1)} is ready as an Inbox.`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = old;
+    toast(error.message, true);
+  }
 }
 
 function newFolderModal() {

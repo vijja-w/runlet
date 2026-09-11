@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import * as runlet from './workspaces.mjs';
+import { mcpToolDescriptions } from './mcp-tools.mjs';
 
 const instructions = `Runlet manages explicitly registered local workspaces, Scripts, and Prompts.
 
@@ -10,7 +11,9 @@ Before reading or changing files, identify the intended workspace. Call get_curr
 
 Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.json, README.md, run.js, inputs/, and outputs/. runlet.json declares its editable name, description, interactive controls, and result panels. Runlet generates the normal interface; index.html is optional for a specialized dashboard. When asked to create a Script, call get_script_template and then create_script. run.js receives { workspace, run, input, pdf, csv, zip, xlsx, docx } and may use only the provided APIs. Binary files use workspace.readBytes and workspace.writeBytes. Run Scripts with run_script and inspect their outputs.
 
-Prompts are reusable AI instructions under prompts/<kebab-case-slug>/PROMPT.md. They are not programs and do not launch a second AI. When asked to create a Prompt, call get_prompt_template and then create_prompt. When asked to use a Prompt, call get_prompt and follow its content using files attached to the conversation or explicitly named workspace files. The user can also copy a Prompt from Runlet and paste it into any compatible AI.`;
+Prompts are reusable AI instructions under prompts/<kebab-case-slug>/PROMPT.md. They are not programs and do not launch a second AI. When asked to create a Prompt, call get_prompt_template and then create_prompt. When asked to use a Prompt, call get_prompt and follow its content using files attached to the conversation or explicitly named workspace files. The user can also copy a Prompt from Runlet and paste it into any compatible AI.
+
+Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, data.csv, processed/, and needs-review/. Loose files in an Inbox root are waiting to be processed. Always call list_inboxes instead of scanning for instruction files. Process only enabled, ready Inboxes; leave an Inbox untouched when it needs attention. For each ready Inbox, follow its instructions, update its data file, move successful source files to its processed folder, and move genuinely ambiguous files to its needs-review folder.`;
 
 const server = new McpServer({ name: 'runlet', version: '0.18.0' }, { instructions });
 const textResult = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -35,17 +38,17 @@ const scriptResult = z.object({
 });
 
 server.registerTool('list_workspaces', {
-  description: 'List registered Runlet workspaces and identify the selected workspace.',
+  description: mcpToolDescriptions.list_workspaces,
   inputSchema: z.object({}),
 }, async () => textResult(await runlet.listWorkspaces()));
 
 server.registerTool('get_current_workspace', {
-  description: 'Return the currently selected workspace. Use when the user says current, active, or selected workspace.',
+  description: mcpToolDescriptions.get_current_workspace,
   inputSchema: z.object({}),
 }, async () => textResult(await runlet.getCurrentWorkspace()));
 
 server.registerTool('create_workspace', {
-  description: 'Create a workspace folder or register an existing folder.',
+  description: mcpToolDescriptions.create_workspace,
   inputSchema: z.object({
     name: z.string().min(1),
     folderPath: z.string().optional().describe('Absolute folder path. Omit to use ~/Runlet Workspaces/<name>.'),
@@ -54,47 +57,52 @@ server.registerTool('create_workspace', {
 }, async (input) => textResult(await runlet.createWorkspace(input)));
 
 server.registerTool('select_workspace', {
-  description: 'Select a registered workspace for the UI and as the default for later tools.',
+  description: mcpToolDescriptions.select_workspace,
   inputSchema: z.object({ workspaceId: z.string() }),
 }, async ({ workspaceId: id }) => textResult(await runlet.selectWorkspace(id)));
 
 server.registerTool('update_workspace', {
-  description: 'Rename a registered workspace. Workspace names must be unique.',
+  description: mcpToolDescriptions.update_workspace,
   inputSchema: z.object({ workspaceId: z.string(), name: z.string().min(1) }),
 }, async ({ workspaceId: id, name }) => textResult(await runlet.updateWorkspace(id, { name })));
 
 server.registerTool('remove_workspace', {
-  description: 'Remove a workspace registration without deleting its folder or files.',
+  description: mcpToolDescriptions.remove_workspace,
   inputSchema: z.object({ workspaceId: z.string() }),
 }, async ({ workspaceId: id }) => textResult(await runlet.removeWorkspace(id)));
 
 server.registerTool('list_files', {
-  description: 'List one directory inside a registered workspace.',
+  description: mcpToolDescriptions.list_files,
   inputSchema: z.object({ workspaceId, path: z.string().default('.') }),
 }, async ({ workspaceId: id, path: target }) => textResult(await runlet.listFiles(id, target)));
 
+server.registerTool('list_inboxes', {
+  description: mcpToolDescriptions.list_inboxes,
+  inputSchema: z.object({ workspaceId }),
+}, async ({ workspaceId: id }) => textResult(await runlet.listInboxes(id)));
+
 server.registerTool('read_file', {
-  description: 'Read a UTF-8 text file inside a registered workspace.',
+  description: mcpToolDescriptions.read_file,
   inputSchema: z.object({ workspaceId, path: z.string() }),
 }, async ({ workspaceId: id, path: target }) => textResult(await runlet.readFile(id, target)));
 
 server.registerTool('write_file', {
-  description: 'Create or replace a UTF-8 text file inside a registered workspace.',
+  description: mcpToolDescriptions.write_file,
   inputSchema: z.object({ workspaceId, path: z.string(), content: z.string() }),
 }, async ({ workspaceId: id, path: target, content }) => textResult(await runlet.writeFile(id, target, content)));
 
 server.registerTool('create_directory', {
-  description: 'Create a folder inside a registered workspace.',
+  description: mcpToolDescriptions.create_directory,
   inputSchema: z.object({ workspaceId, path: z.string() }),
 }, async ({ workspaceId: id, path: target }) => textResult(await runlet.makeDirectory(id, target)));
 
 server.registerTool('move_file', {
-  description: 'Rename or move a file or folder inside the same workspace.',
+  description: mcpToolDescriptions.move_file,
   inputSchema: z.object({ workspaceId, from: z.string(), to: z.string() }),
 }, async ({ workspaceId: id, from, to }) => textResult(await runlet.moveFile(id, from, to)));
 
 server.registerTool('delete_file', {
-  description: 'Delete a file or folder inside a workspace. Never deletes the workspace root.',
+  description: mcpToolDescriptions.delete_file,
   inputSchema: z.object({ workspaceId, path: z.string() }),
 }, async ({ workspaceId: id, path: target }) => {
   await runlet.deleteFile(id, target);
@@ -102,22 +110,22 @@ server.registerTool('delete_file', {
 });
 
 server.registerTool('list_scripts', {
-  description: 'List runnable Scripts in a workspace, including inputs, outputs, and view availability.',
+  description: mcpToolDescriptions.list_scripts,
   inputSchema: z.object({ workspaceId }),
 }, async ({ workspaceId: id }) => textResult(await runlet.listScripts(id)));
 
 server.registerTool('get_script', {
-  description: 'Read one Script’s metadata and instructions.',
+  description: mcpToolDescriptions.get_script,
   inputSchema: z.object({ workspaceId, slug: z.string() }),
 }, async ({ workspaceId: id, slug }) => textResult(await runlet.getScript(id, slug)));
 
 server.registerTool('get_script_template', {
-  description: 'Get the authoritative Script structure and rules. Always call before create_script.',
+  description: mcpToolDescriptions.get_script_template,
   inputSchema: z.object({ withView: z.boolean().default(false) }),
 }, async ({ withView }) => textResult(runlet.getScriptTemplate(withView)));
 
 server.registerTool('create_script', {
-  description: 'Create a validated local Script mini-app with generated controls and result panels. Creates inputs/ and outputs/ automatically.',
+  description: mcpToolDescriptions.create_script,
   inputSchema: z.object({
     workspaceId,
     slug: z.string().describe('Lower-case kebab-case folder name.'),
@@ -133,27 +141,27 @@ server.registerTool('create_script', {
 }, async (input) => textResult(await runlet.createScript(input)));
 
 server.registerTool('run_script', {
-  description: 'Run a local Script and return its logs. Inspect its outputs before reporting completion.',
+  description: mcpToolDescriptions.run_script,
   inputSchema: z.object({ workspaceId, slug: z.string(), input: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}) }),
 }, async ({ workspaceId: id, slug, input }) => textResult(await runlet.runScript(id, slug, input)));
 
 server.registerTool('get_script_results', {
-  description: 'Read the Script outputs declared as summary, text, or table result panels.',
+  description: mcpToolDescriptions.get_script_results,
   inputSchema: z.object({ workspaceId, slug: z.string() }),
 }, async ({ workspaceId: id, slug }) => textResult(await runlet.getScriptResults(id, slug)));
 
 server.registerTool('update_script_metadata', {
-  description: 'Change a Script’s display name or description without renaming its folder.',
+  description: mcpToolDescriptions.update_script_metadata,
   inputSchema: z.object({ workspaceId, slug: z.string(), name: z.string().optional(), description: z.string().optional() }),
 }, async ({ workspaceId: id, slug, name, description }) => textResult(await runlet.updateScriptMetadata(id, slug, { name, description })));
 
 server.registerTool('delete_script', {
-  description: 'Permanently delete a Script and its inputs and outputs. Use only when the user explicitly asks.',
+  description: mcpToolDescriptions.delete_script,
   inputSchema: z.object({ workspaceId, slug: z.string() }),
 }, async ({ workspaceId: id, slug }) => textResult(await runlet.deleteScript(id, slug)));
 
 server.registerTool('read_script_input', {
-  description: 'Read a binary or text Script input as an embedded resource.',
+  description: mcpToolDescriptions.read_script_input,
   inputSchema: z.object({ workspaceId, slug: z.string(), name: z.string() }),
 }, async ({ workspaceId: id, slug, name }) => {
   const input = await runlet.readScriptInput(id, slug, name);
@@ -163,47 +171,47 @@ server.registerTool('read_script_input', {
 });
 
 server.registerTool('write_script_input', {
-  description: 'Add or replace a Script input using UTF-8 text or base64 binary data.',
+  description: mcpToolDescriptions.write_script_input,
   inputSchema: z.object({ workspaceId, slug: z.string(), name: z.string(), ...encodedData }),
 }, async ({ workspaceId: id, slug, name, data, encoding }) => textResult(await runlet.writeScriptInput(id, slug, name, Buffer.from(data, encoding))));
 
 server.registerTool('write_script_output', {
-  description: 'Write UTF-8 text or base64 binary data beneath a Script outputs/ directory.',
+  description: mcpToolDescriptions.write_script_output,
   inputSchema: z.object({ workspaceId, slug: z.string(), name: z.string(), ...encodedData }),
 }, async ({ workspaceId: id, slug, name, data, encoding }) => textResult(await runlet.writeScriptOutput(id, slug, name, Buffer.from(data, encoding))));
 
 server.registerTool('list_prompts', {
-  description: 'List reusable Prompts in a workspace.',
+  description: mcpToolDescriptions.list_prompts,
   inputSchema: z.object({ workspaceId }),
 }, async ({ workspaceId: id }) => textResult(await runlet.listPrompts(id)));
 
 server.registerTool('get_prompt', {
-  description: 'Get a saved Prompt. When the user asks to use it, follow the returned content with their attached or named files.',
+  description: mcpToolDescriptions.get_prompt,
   inputSchema: z.object({ workspaceId, slug: z.string() }),
 }, async ({ workspaceId: id, slug }) => textResult(await runlet.getPrompt(id, slug)));
 
 server.registerTool('get_prompt_template', {
-  description: 'Get the authoritative Prompt structure and authoring rules. Always call before create_prompt.',
+  description: mcpToolDescriptions.get_prompt_template,
   inputSchema: z.object({}),
 }, async () => textResult(runlet.getPromptTemplate()));
 
 server.registerTool('create_prompt', {
-  description: 'Create a reusable provider-neutral Prompt in a workspace.',
+  description: mcpToolDescriptions.create_prompt,
   inputSchema: z.object({ workspaceId, slug: z.string(), name: z.string(), description: z.string(), content: z.string(), overwrite: z.boolean().default(false) }),
 }, async (input) => textResult(await runlet.createPrompt(input)));
 
 server.registerTool('update_prompt', {
-  description: 'Replace the content of an existing Prompt.',
+  description: mcpToolDescriptions.update_prompt,
   inputSchema: z.object({ workspaceId, slug: z.string(), content: z.string() }),
 }, async ({ workspaceId: id, slug, content }) => textResult(await runlet.updatePrompt(id, slug, content)));
 
 server.registerTool('update_prompt_metadata', {
-  description: 'Change a Prompt’s display name or description without changing its instructions or folder name.',
+  description: mcpToolDescriptions.update_prompt_metadata,
   inputSchema: z.object({ workspaceId, slug: z.string(), name: z.string().optional(), description: z.string().optional() }),
 }, async ({ workspaceId: id, slug, name, description }) => textResult(await runlet.updatePromptMetadata(id, slug, { name, description })));
 
 server.registerTool('delete_prompt', {
-  description: 'Permanently delete a Prompt. Use only when the user explicitly asks.',
+  description: mcpToolDescriptions.delete_prompt,
   inputSchema: z.object({ workspaceId, slug: z.string() }),
 }, async ({ workspaceId: id, slug }) => textResult(await runlet.deletePrompt(id, slug)));
 
