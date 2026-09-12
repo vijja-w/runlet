@@ -84,6 +84,8 @@ Turning an Inbox off preserves all of its files but removes it from normal AI pr
 
 Runlet connects to compatible AI apps through MCP. It provides tools for registered workspaces, files and Inboxes, Scripts, and Prompts. The AI can only access folders that have been explicitly registered as Runlet workspaces.
 
+For Inboxes, the AI uses `list_inboxes` to discover enabled work, `get_inbox` to read one Inbox and its instructions, and `update_inbox_instructions` when you ask it to change those instructions. Processing still uses the ordinary file tools to update `data.csv` and move source files, keeping the interface small and consistent.
+
 To see the complete current list with a description of each tool, run:
 
 ```bash

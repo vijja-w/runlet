@@ -88,6 +88,14 @@ test('configures, pauses, repairs, and discovers Inboxes safely', async () => {
   assert.equal(discovered[0].processedPath, path.join('Invoices', 'processed'));
   assert.equal(discovered[0].needsReviewPath, path.join('Invoices', 'needs-review'));
 
+  const inbox = await runlet.getInbox(current.id, 'Invoices');
+  assert.match(inbox.instructions, /Inbox instructions/);
+  const updated = await runlet.updateInboxInstructions(current.id, 'Invoices', '# Invoice instructions\n\nExtract the total.\n');
+  assert.equal(updated.instructions, '# Invoice instructions\n\nExtract the total.\n');
+  assert.equal(await runlet.readFile(current.id, 'Invoices/INSTRUCTIONS.md'), updated.instructions);
+  await assert.rejects(runlet.getInbox(current.id, 'not-an-inbox'), /not found/i);
+  await assert.rejects(runlet.updateInboxInstructions(current.id, 'scripts', '# No'), /not an Inbox/i);
+
   await runlet.deleteFile(current.id, 'Invoices/data.csv');
   const listed = (await runlet.listFiles(current.id)).find((item) => item.name === 'Invoices');
   assert.equal(listed.inbox.status, 'attention');
@@ -330,6 +338,8 @@ test('shows version and update commands in the CLI', async () => {
   const toolsResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'tools']);
   assert.match(toolsResult.stdout, /Runlet tools provided to connected AI apps/);
   assert.match(toolsResult.stdout, /list_inboxes\s+List enabled Runlet Inboxes/);
+  assert.match(toolsResult.stdout, /get_inbox\s+Inspect one configured Inbox/);
+  assert.match(toolsResult.stdout, /update_inbox_instructions\s+Create or replace the instructions/);
   assert.match(toolsResult.stdout, /run_script\s+Run a local Script/);
   assert.match(toolsResult.stdout, /create_prompt\s+Create a reusable provider-neutral Prompt/);
   assert.match(toolsResult.stdout, /only explicitly registered Runlet workspaces/);

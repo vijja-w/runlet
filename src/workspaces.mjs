@@ -870,6 +870,49 @@ async function inboxPendingFiles(directory, config) {
   return entries.filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !reserved.has(entry.name)).map((entry) => entry.name).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
+export async function getInbox(workspaceId, relativePath) {
+  const workspace = await getWorkspace(workspaceId);
+  const directory = resolveInside(workspace.path, relativePath);
+  const stat = await fs.stat(directory).catch(() => null);
+  if (!stat?.isDirectory()) throw new Error('Inbox folder not found.');
+  const manifest = await readInboxManifest(directory);
+  if (!manifest.config) throw new Error(manifest.reason || 'This folder is not an Inbox.');
+  const description = await describeInboxFolder(workspace, relativePath);
+  const instructions = description.instructionsAvailable
+    ? await fs.readFile(path.join(directory, manifest.config.instructions), 'utf8')
+    : null;
+  return {
+    path: relativePath,
+    name: path.basename(directory),
+    enabled: description.enabled,
+    ready: description.ready,
+    status: description.status,
+    reason: description.reason,
+    issues: description.issues,
+    instructionsPath: description.instructionsPath,
+    instructions,
+    dataPath: description.dataPath,
+    processedPath: description.processedPath,
+    needsReviewPath: description.needsReviewPath,
+    pendingFiles: await inboxPendingFiles(directory, manifest.config),
+  };
+}
+
+export async function updateInboxInstructions(workspaceId, relativePath, content) {
+  const workspace = await getWorkspace(workspaceId);
+  const directory = resolveInside(workspace.path, relativePath);
+  const manifest = await readInboxManifest(directory);
+  if (!manifest.config) throw new Error(manifest.reason || 'This folder is not an Inbox.');
+  const target = path.join(directory, manifest.config.instructions);
+  const stat = await fs.stat(target).catch(() => null);
+  if (stat && !stat.isFile()) throw new Error(`${manifest.config.instructions} is not a file.`);
+  const temporary = `${target}.tmp-${uniqueId()}`;
+  await fs.writeFile(temporary, content);
+  try { await fs.rename(temporary, target); }
+  catch (error) { await fs.rm(temporary, { force: true }); throw error; }
+  return getInbox(workspace.id, relativePath);
+}
+
 export async function listInboxes(workspaceId, { includeDisabled = false } = {}) {
   const workspace = await getWorkspace(workspaceId);
   const inboxes = [];

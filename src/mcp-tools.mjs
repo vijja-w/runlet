@@ -15,6 +15,8 @@ export const mcpToolGroups = [
     tools: [
       ['list_files', 'List one directory inside a registered workspace.'],
       ['list_inboxes', 'List enabled Runlet Inboxes in a workspace, including readiness, instructions, data, and pending files. Use this before processing Inbox files.'],
+      ['get_inbox', 'Inspect one configured Inbox, including its instructions, readiness, paths, and pending files.'],
+      ['update_inbox_instructions', 'Create or replace the instructions for one configured Inbox.'],
       ['read_file', 'Read a UTF-8 text file inside a registered workspace.'],
       ['write_file', 'Create or replace a UTF-8 text file inside a registered workspace.'],
       ['create_directory', 'Create a folder inside a registered workspace.'],

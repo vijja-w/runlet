@@ -13,7 +13,7 @@ Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.j
 
 Prompts are reusable AI instructions under prompts/<kebab-case-slug>/PROMPT.md. They are not programs and do not launch a second AI. When asked to create a Prompt, call get_prompt_template and then create_prompt. When asked to use a Prompt, call get_prompt and follow its content using files attached to the conversation or explicitly named workspace files. The user can also copy a Prompt from Runlet and paste it into any compatible AI.
 
-Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, data.csv, processed/, and needs-review/. Loose files in an Inbox root are waiting to be processed. Always call list_inboxes instead of scanning for instruction files. Process only enabled, ready Inboxes; leave an Inbox untouched when it needs attention. For each ready Inbox, follow its instructions, update its data file, move successful source files to its processed folder, and move genuinely ambiguous files to its needs-review folder.`;
+Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, data.csv, processed/, and needs-review/. Loose files in an Inbox root are waiting to be processed. Always call list_inboxes instead of scanning for instruction files, then call get_inbox to read the instructions for an Inbox before processing it. Process only enabled, ready Inboxes; leave an Inbox untouched when it needs attention. For each ready Inbox, follow its instructions, update its data file, move successful source files to its processed folder, and move genuinely ambiguous files to its needs-review folder.`;
 
 const server = new McpServer({ name: 'runlet', version: '0.18.0' }, { instructions });
 const textResult = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -80,6 +80,20 @@ server.registerTool('list_inboxes', {
   description: mcpToolDescriptions.list_inboxes,
   inputSchema: z.object({ workspaceId }),
 }, async ({ workspaceId: id }) => textResult(await runlet.listInboxes(id)));
+
+server.registerTool('get_inbox', {
+  description: mcpToolDescriptions.get_inbox,
+  inputSchema: z.object({ workspaceId, path: z.string().min(1).describe('Path to the Inbox folder, relative to the workspace.') }),
+}, async ({ workspaceId: id, path: target }) => textResult(await runlet.getInbox(id, target)));
+
+server.registerTool('update_inbox_instructions', {
+  description: mcpToolDescriptions.update_inbox_instructions,
+  inputSchema: z.object({
+    workspaceId,
+    path: z.string().min(1).describe('Path to the Inbox folder, relative to the workspace.'),
+    content: z.string().describe('Complete Markdown content for the Inbox instructions.'),
+  }),
+}, async ({ workspaceId: id, path: target, content }) => textResult(await runlet.updateInboxInstructions(id, target, content)));
 
 server.registerTool('read_file', {
   description: mcpToolDescriptions.read_file,
