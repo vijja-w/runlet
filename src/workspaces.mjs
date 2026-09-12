@@ -9,6 +9,9 @@ const stateDir = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_
 const statePath = path.join(stateDir, 'state.json');
 const legacyStatePath = path.join(appRoot, '.workshop', 'state.json');
 const workerPath = path.join(appRoot, 'src', 'action-worker.mjs');
+const runHistoryLimit = 50;
+const runHistoryEntryLimit = 64_000;
+const runHistoryWrites = new Map();
 const inboxDefaults = Object.freeze({
   kind: 'inbox',
   version: 1,
@@ -71,6 +74,45 @@ async function listRelativeFiles(directory, prefix = '') {
 }
 
 function uniqueId() { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
+
+function truncate(value, limit) {
+  const text = String(value || '');
+  return text.length <= limit ? text : `${text.slice(0, limit - 14)}\n…truncated…`;
+}
+
+function boundedLogs(logs) {
+  const kept = [];
+  let remaining = runHistoryEntryLimit;
+  for (const value of Array.isArray(logs) ? logs : []) {
+    if (remaining <= 0) break;
+    const line = truncate(value, remaining);
+    kept.push(line);
+    remaining -= line.length;
+  }
+  return kept;
+}
+
+function runHistoryPath(scriptDirectory) {
+  return path.join(scriptDirectory, '.runlet', 'runs.jsonl');
+}
+
+async function appendScriptRun(scriptDirectory, entry) {
+  const previous = runHistoryWrites.get(scriptDirectory) || Promise.resolve();
+  const next = previous.catch(() => {}).then(async () => {
+    const target = runHistoryPath(scriptDirectory);
+    const history = (await fs.readFile(target, 'utf8').catch(() => ''))
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+      .filter(Boolean);
+    history.push(entry);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, `${history.slice(-runHistoryLimit).map((run) => JSON.stringify(run)).join('\n')}\n`);
+  });
+  runHistoryWrites.set(scriptDirectory, next);
+  try { await next; }
+  finally { if (runHistoryWrites.get(scriptDirectory) === next) runHistoryWrites.delete(scriptDirectory); }
+}
 
 export async function listWorkspaces() {
   const state = await loadState();
@@ -576,24 +618,69 @@ export async function deleteScript(workspaceId, slug) {
 export async function runScript(workspaceId, slug, input = {}) {
   const workspace = await getWorkspace(workspaceId);
   const script = await getScript(workspace.id, slug);
-  const values = {};
-  for (const control of script.controls) {
-    let value = input?.[control.name] ?? control.default ?? '';
-    if (control.type === 'number' && value !== '') {
-      value = Number(value);
-      if (!Number.isFinite(value)) throw new Error(`${control.label || control.name} must be a number.`);
-    }
-    if (control.required && (value === '' || value === null || value === undefined)) throw new Error(`${control.label || control.name} is required.`);
-    if (control.type === 'select' && value !== '' && !control.options.includes(String(value))) throw new Error(`${control.label || control.name} is not a valid option.`);
-    values[control.name] = value;
-  }
   const scriptDir = resolveInside(workspace.path, path.join('scripts', slug));
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(workerPath, { workerData: { workspacePath: workspace.path, actionDir: scriptDir, input: values }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 } });
-    const timer = setTimeout(() => { worker.terminate(); reject(new Error('Script exceeded the 30 second time limit.')); }, 30_000);
-    worker.once('message', (message) => { clearTimeout(timer); message.ok ? resolve(message) : reject(new Error(message.error)); });
-    worker.once('error', (error) => { clearTimeout(timer); reject(error); });
-  });
+  const startedAt = new Date();
+  try {
+    const values = {};
+    for (const control of script.controls) {
+      let value = input?.[control.name] ?? control.default ?? '';
+      if (control.type === 'number' && value !== '') {
+        value = Number(value);
+        if (!Number.isFinite(value)) throw new Error(`${control.label || control.name} must be a number.`);
+      }
+      if (control.required && (value === '' || value === null || value === undefined)) throw new Error(`${control.label || control.name} is required.`);
+      if (control.type === 'select' && value !== '' && !control.options.includes(String(value))) throw new Error(`${control.label || control.name} is not a valid option.`);
+      values[control.name] = value;
+    }
+    const result = await new Promise((resolve, reject) => {
+      const worker = new Worker(workerPath, { workerData: { workspacePath: workspace.path, actionDir: scriptDir, input: values }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 } });
+      const timer = setTimeout(() => { worker.terminate(); reject(new Error('Script exceeded the 30 second time limit.')); }, 30_000);
+      worker.once('message', (message) => {
+        clearTimeout(timer);
+        if (message.ok) return resolve(message);
+        const error = new Error(message.error || 'Script failed.');
+        error.runLogs = message.logs;
+        error.runStack = message.stack;
+        reject(error);
+      });
+      worker.once('error', (error) => { clearTimeout(timer); reject(error); });
+    });
+    const finishedAt = new Date();
+    await appendScriptRun(scriptDir, {
+      id: uniqueId(),
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      durationMs: finishedAt - startedAt,
+      status: 'completed',
+      logs: boundedLogs(result.logs),
+    }).catch(() => {});
+    return result;
+  } catch (error) {
+    const finishedAt = new Date();
+    await appendScriptRun(scriptDir, {
+      id: uniqueId(),
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      durationMs: finishedAt - startedAt,
+      status: 'failed',
+      logs: boundedLogs(error.runLogs),
+      error: truncate(error instanceof Error ? error.message : String(error), 8_000),
+      details: truncate(error.runStack || (error instanceof Error ? error.stack : ''), 32_000),
+    }).catch(() => {});
+    throw error;
+  }
+}
+
+export async function getScriptRunHistory(workspaceId, slug) {
+  const workspace = await getWorkspace(workspaceId);
+  await getScript(workspace.id, slug);
+  const scriptDir = resolveInside(workspace.path, path.join('scripts', slug));
+  const history = (await fs.readFile(runHistoryPath(scriptDir), 'utf8').catch(() => ''))
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+    .filter(Boolean);
+  return history.slice(-runHistoryLimit).reverse();
 }
 
 export async function getScriptResults(workspaceId, slug) {
@@ -956,7 +1043,7 @@ export async function listFiles(workspaceId, relativePath = '.') {
   const workspace = await getWorkspace(workspaceId);
   const directory = resolveInside(workspace.path, relativePath);
   const entries = await fs.readdir(directory, { withFileTypes: true });
-  return Promise.all(entries.filter((entry) => !['.git', 'node_modules', '.DS_Store'].includes(entry.name)).map(async (entry) => {
+  return Promise.all(entries.filter((entry) => !['.git', '.runlet', 'node_modules', '.DS_Store'].includes(entry.name)).map(async (entry) => {
     const itemPath = path.join(directory, entry.name);
     const stat = await fs.stat(itemPath);
     const itemRelativePath = path.relative(workspace.path, itemPath) || '.';

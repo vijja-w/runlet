@@ -6,6 +6,8 @@ let selectedScript = null;
 let selectedPrompt = null;
 let scriptResults = [];
 let scriptInputValues = {};
+let scriptRunHistory = [];
+let scriptHistoryOpen = false;
 let filePath = initialLocation.get('path') || '.';
 let selectedWorkspaceId = null;
 let connectionsLoading = false;
@@ -159,14 +161,34 @@ function scriptDetail(script) {
     ? script.controls.map((control) => renderScriptControl(control)).join('')
     : '<p class="muted">This Script is ready to run.</p>';
   const resultPanels = scriptResults.filter((result) => !result.missing).map(renderResult).join('');
-  const topControls = `${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Previous run</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
+  const topControls = `<button class="secondary" id="script-run-history" type="button">Run history</button>${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Previous run</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
   return `${topbar(script.name, script.description, topControls, 'script')}<div class="script-app">
     <form id="script-run-form" class="control-panel">
       <div class="control-grid">${controlFields}</div>
       <div class="run-footer"><span>Runs locally in this workspace.</span><button class="primary run-script" type="submit" data-run-script="${escapeHtml(script.slug)}">Run</button></div>
     </form>
+    ${scriptHistoryOpen ? renderRunHistory() : ''}
     ${script.results.length ? `<section class="results-section"><h2>Results</h2><div class="results-grid">${resultPanels || '<div class="empty compact"><p>Run the Script to see results.</p></div>'}</div></section>` : ''}
   </div>`;
+}
+
+function renderRunHistory() {
+  const records = scriptRunHistory.length ? scriptRunHistory.map((run) => {
+    const failed = run.status === 'failed';
+    const timestamp = new Date(run.finishedAt || run.startedAt);
+    const when = Number.isNaN(timestamp.valueOf()) ? '' : timestamp.toLocaleString();
+    const duration = Number(run.durationMs) >= 1000 ? `${(Number(run.durationMs) / 1000).toFixed(1)}s` : `${Math.max(0, Number(run.durationMs) || 0)}ms`;
+    const logs = (run.logs || []).length
+      ? `<pre>${escapeHtml(run.logs.join('\n'))}</pre>`
+      : '<p class="muted">No messages were recorded.</p>';
+    const error = failed && run.error ? `<p class="run-error">${escapeHtml(run.error)}</p>` : '';
+    const details = failed && run.details ? `<details><summary>Technical details</summary><pre>${escapeHtml(run.details)}</pre></details>` : '';
+    return `<article class="run-record ${failed ? 'failed' : 'completed'}">
+      <div class="run-record-heading"><strong>${failed ? 'Failed' : 'Completed'}</strong><span>${escapeHtml(when)} · ${escapeHtml(duration)}</span></div>
+      ${error}${logs}${details}
+    </article>`;
+  }).join('') : '<div class="empty compact"><p>No runs recorded yet.</p></div>';
+  return `<section class="run-history-section"><div class="run-history-heading"><h2>Run history</h2><button class="secondary small" id="close-run-history" type="button">Close</button></div><div class="run-history-list">${records}</div></section>`;
 }
 
 function renderScriptControl(control) {
@@ -337,6 +359,8 @@ function bindEvents() {
     selectedScript = state.scripts.find((script) => script.slug === card.dataset.script);
     scriptResults = [];
     scriptInputValues = {};
+    scriptRunHistory = [];
+    scriptHistoryOpen = false;
     render();
   });
   document.querySelectorAll('[data-open-script]').forEach((button) => button.onclick = (event) => {
@@ -344,6 +368,8 @@ function bindEvents() {
     selectedScript = state.scripts.find((script) => script.slug === button.dataset.openScript);
     scriptResults = [];
     scriptInputValues = {};
+    scriptRunHistory = [];
+    scriptHistoryOpen = false;
     render();
   });
   document.querySelectorAll('[data-prompt]').forEach((card) => card.onclick = (event) => {
@@ -357,13 +383,15 @@ function bindEvents() {
   document.querySelectorAll('[data-delete-kind]').forEach((button) => button.onclick = () => confirmDeleteItem(button.dataset.deleteKind, button.dataset.deleteSlug));
   document.querySelectorAll('[data-file-path]').forEach((button) => button.onclick = () => openFolder(button.dataset.filePath));
   bindFileBrowser();
-  document.querySelector('#back')?.addEventListener('click', () => { selectedScript = null; selectedPrompt = null; scriptResults = []; scriptInputValues = {}; render(); });
+  document.querySelector('#back')?.addEventListener('click', () => { selectedScript = null; selectedPrompt = null; scriptResults = []; scriptInputValues = {}; scriptRunHistory = []; scriptHistoryOpen = false; render(); });
   document.querySelector('#refresh')?.addEventListener('click', refresh);
   document.querySelector('#workspace-switch')?.addEventListener('click', workspaceSwitcher);
   document.querySelector('#refresh-connections')?.addEventListener('click', loadConnections);
   document.querySelectorAll('[data-connection]').forEach((button) => button.onclick = () => changeConnection(button));
   document.querySelector('#prompt-form')?.addEventListener('submit', savePrompt);
   document.querySelector('#script-run-form')?.addEventListener('submit', runScript);
+  document.querySelector('#script-run-history')?.addEventListener('click', toggleScriptRunHistory);
+  document.querySelector('#close-run-history')?.addEventListener('click', () => { scriptHistoryOpen = false; render(); });
   document.querySelectorAll('[data-meta-field]').forEach((element) => {
     element.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') { event.preventDefault(); element.blur(); }
@@ -906,6 +934,21 @@ async function loadScriptResults() {
   } catch (error) { toast(error.message, true); }
 }
 
+async function loadScriptRunHistory() {
+  if (!selectedScript) return;
+  const slug = selectedScript.slug;
+  scriptRunHistory = await api(`/api/scripts/${encodeURIComponent(slug)}/runs?workspaceId=${encodeURIComponent(state.selected.id)}`);
+}
+
+async function toggleScriptRunHistory() {
+  scriptHistoryOpen = !scriptHistoryOpen;
+  if (scriptHistoryOpen) {
+    try { await loadScriptRunHistory(); }
+    catch (error) { toast(error.message, true); }
+  }
+  render();
+}
+
 async function runScript(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -925,6 +968,7 @@ async function runScript(event) {
   try {
     const response = await api(`/api/scripts/${encodeURIComponent(slug)}/run`, { method:'POST', body: JSON.stringify({ workspaceId: state.selected.id, input: scriptInputValues }) });
     await refresh();
+    if (scriptHistoryOpen) { await loadScriptRunHistory(); render(); }
     if (hasView) {
       if (viewWindow) viewWindow.location.replace(`/script-view/${state.selected.id}/${encodeURIComponent(slug)}`);
       toast(viewWindow ? (response.logs?.at(-1) || 'Script finished. Its page opened in a new tab.') : 'Script finished. Use Previous run to view it.');
@@ -934,9 +978,12 @@ async function runScript(event) {
     }
   } catch (error) {
     if (viewWindow) viewWindow.close();
-    toast(error.message, true);
     button.disabled = false;
     button.textContent = old;
+    scriptHistoryOpen = true;
+    try { await loadScriptRunHistory(); } catch {}
+    render();
+    toast('Something went wrong. Check Run history.', true);
   }
 }
 

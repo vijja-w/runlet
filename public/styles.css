@@ -292,6 +292,19 @@ nav em {
 .result-table th, .result-table td { padding: 11px 14px; border-top: 1px solid var(--line); text-align: left; white-space: nowrap; }
 .result-table th { color: var(--muted); background: #fafaf7; font-size: 11px; font-weight: 700; }
 .result-table tbody tr:hover { background: var(--soft); }
+.run-history-section { margin-top: 30px; }
+.run-history-heading { margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.run-history-heading h2 { margin: 0; font-size: 16px; }
+.run-history-list { display: grid; gap: 10px; }
+.run-record { padding: 16px 18px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; background: var(--paper); }
+.run-record.failed { border-left-color: var(--danger); }
+.run-record-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.run-record-heading strong { font-size: 13px; }
+.run-record-heading span { color: var(--muted); font-size: 11px; }
+.run-record pre { max-height: 180px; margin: 12px 0 0; padding: 12px; overflow: auto; border-radius: 7px; background: var(--soft); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-error { margin: 10px 0 0; color: var(--danger); font-size: 13px; font-weight: 650; }
+.run-record details { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.run-record summary { cursor: pointer; }
 
 .files-main { display: flex; flex-direction: column; overflow: hidden; background: #f7f7f5; }
 .files-topbar {

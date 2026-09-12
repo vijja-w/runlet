@@ -70,6 +70,9 @@ const data = await response.json();
 
 - `run.log(message)` adds a message to the completed run.
 - `console.log(...)` also writes a message to the run log.
+- Runlet keeps the 50 most recent successful and failed runs for each Script.
+- Each saved run includes its time, duration, log messages, and final error when one occurs.
+- Run history is size-limited and stored in a hidden Runlet-managed folder inside the Script.
 
 ## PDF helper
 

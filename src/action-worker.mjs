@@ -168,5 +168,12 @@ try {
   await action({ workspace, run, input: Object.freeze({ ...(workerData.input || {}) }), pdf, csv, zip, xlsx, docx });
   parentPort.postMessage({ ok: true, kind: 'script', status: 'completed', logs });
 } catch (error) {
-  parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error), logs });
+  const message = error && typeof error.message === 'string' ? error.message : String(error);
+  const stack = error && typeof error.stack === 'string' ? error.stack : '';
+  parentPort.postMessage({
+    ok: false,
+    error: message,
+    stack,
+    logs,
+  });
 }

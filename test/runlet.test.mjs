@@ -147,6 +147,7 @@ test('creates and runs a Script', async () => {
     runJs: `export default async function ({ workspace, run, input }) {
       await workspace.write('scripts/copy-text/outputs/result.txt', input.recipe + ': ' + input.message.toUpperCase());
       run.log('Created message.');
+      if (input.message === 'fail') throw new Error('Deliberate failure.');
     }`,
   });
   const listed = await runlet.getScript(current.id, 'copy-text');
@@ -156,6 +157,29 @@ test('creates and runs a Script', async () => {
   assert.deepEqual(result.logs, ['Created message.']);
   assert.equal(await runlet.readFile(current.id, 'scripts/copy-text/outputs/result.txt'), 'Sourdough: HELLO');
   assert.equal((await runlet.getScriptResults(current.id, 'copy-text'))[0].content, 'Sourdough: HELLO');
+
+  let history = await runlet.getScriptRunHistory(current.id, 'copy-text');
+  assert.equal(history.length, 1);
+  assert.equal(history[0].status, 'completed');
+  assert.deepEqual(history[0].logs, ['Created message.']);
+
+  await assert.rejects(
+    runlet.runScript(current.id, 'copy-text', { recipe: 'Sourdough', message: 'fail' }),
+    /Deliberate failure/,
+  );
+  history = await runlet.getScriptRunHistory(current.id, 'copy-text');
+  assert.equal(history[0].status, 'failed');
+  assert.equal(history[0].error, 'Deliberate failure.');
+  assert.deepEqual(history[0].logs, ['Created message.']);
+  assert.match(history[0].details, /run\.js/);
+  assert.equal((await runlet.listFiles(current.id, 'scripts/copy-text')).some((item) => item.name === '.runlet'), false);
+
+  for (let index = 0; index < 50; index += 1) {
+    await runlet.runScript(current.id, 'copy-text', { recipe: 'Sourdough', message: `run-${index}` });
+  }
+  history = await runlet.getScriptRunHistory(current.id, 'copy-text');
+  assert.equal(history.length, 50);
+  assert.ok(history.every((run) => run.status === 'completed'));
 
   const renamed = await runlet.updateScriptMetadata(current.id, 'copy-text', { name: 'Recipe Note', description: 'Make a short recipe note.' });
   assert.equal(renamed.name, 'Recipe Note');

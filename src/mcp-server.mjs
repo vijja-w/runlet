@@ -9,7 +9,7 @@ const instructions = `Runlet manages explicitly registered local workspaces, Scr
 
 Before reading or changing files, identify the intended workspace. Call get_current_workspace when the user refers to the active workspace. Call list_workspaces when it is ambiguous. If the user names a workspace, select it and pass its workspaceId to every later operation. Never modify an unregistered folder.
 
-Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.json, README.md, run.js, inputs/, and outputs/. runlet.json declares its editable name, description, interactive controls, and result panels. Runlet generates the normal interface; index.html is optional for a specialized dashboard. When asked to create a Script, call get_script_template and then create_script. run.js receives { workspace, run, input, pdf, csv, zip, xlsx, docx } and may use only the provided APIs. Binary files use workspace.readBytes and workspace.writeBytes. Run Scripts with run_script and inspect their outputs.
+Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.json, README.md, run.js, inputs/, and outputs/. runlet.json declares its editable name, description, interactive controls, and result panels. Runlet generates the normal interface; index.html is optional for a specialized dashboard. When asked to create a Script, call get_script_template and then create_script. run.js receives { workspace, run, input, pdf, csv, zip, xlsx, docx } and may use only the provided APIs. Binary files use workspace.readBytes and workspace.writeBytes. Run Scripts with run_script and inspect their outputs. If a run fails, call get_script_run_history to inspect its final error and run.log messages.
 
 Prompts are reusable AI instructions under prompts/<kebab-case-slug>/PROMPT.md. They are not programs and do not launch a second AI. When asked to create a Prompt, call get_prompt_template and then create_prompt. When asked to use a Prompt, call get_prompt and follow its content using files attached to the conversation or explicitly named workspace files. The user can also copy a Prompt from Runlet and paste it into any compatible AI.
 
@@ -158,6 +158,11 @@ server.registerTool('run_script', {
   description: mcpToolDescriptions.run_script,
   inputSchema: z.object({ workspaceId, slug: z.string(), input: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}) }),
 }, async ({ workspaceId: id, slug, input }) => textResult(await runlet.runScript(id, slug, input)));
+
+server.registerTool('get_script_run_history', {
+  description: mcpToolDescriptions.get_script_run_history,
+  inputSchema: z.object({ workspaceId, slug: z.string() }),
+}, async ({ workspaceId: id, slug }) => textResult(await runlet.getScriptRunHistory(id, slug)));
 
 server.registerTool('get_script_results', {
   description: mcpToolDescriptions.get_script_results,

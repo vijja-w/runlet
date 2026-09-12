@@ -32,6 +32,7 @@ export const mcpToolGroups = [
       ['get_script_template', 'Get the authoritative Script structure and rules. Always call before create_script.'],
       ['create_script', 'Create a validated local Script mini-app with generated controls and result panels. Creates inputs/ and outputs/ automatically.'],
       ['run_script', 'Run a local Script and return its logs. Inspect its outputs before reporting completion.'],
+      ['get_script_run_history', 'Read the 50 most recent completed and failed runs for a Script, including its run.log messages and final errors.'],
       ['get_script_results', 'Read the Script outputs declared as summary, text, or table result panels.'],
       ['update_script_metadata', 'Change a Script’s display name or description without renaming its folder.'],
       ['delete_script', 'Permanently delete a Script and its inputs and outputs. Use only when the user explicitly asks.'],
