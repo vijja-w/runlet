@@ -1,6 +1,6 @@
-# Runlet Script JavaScript API
+# Runlet App JavaScript API
 
-This is the complete API available to a Script's `run.js`. Runlet bundles these capabilities with every installation; individual Scripts do not install packages.
+This is the complete API available to an App's `run.js`. Runlet bundles these capabilities with every installation; individual Apps do not install packages.
 
 For a short list from any installed copy, run:
 
@@ -8,7 +8,7 @@ For a short list from any installed copy, run:
 runlet libraries
 ```
 
-## Script entry point
+## App entry point
 
 `run.js` exports one default async function:
 
@@ -24,7 +24,7 @@ export default async function ({ workspace, run, input, data, pdf, csv, zip, xls
 - `data` reads and updates the workspace's Inbox tables.
 - `pdf`, `csv`, `zip`, `xlsx`, and `docx` are bundled file helpers.
 
-Scripts cannot use `import`, `require`, Node.js filesystem APIs, `process`, child processes, shell commands, native binaries, installed npm packages, secrets, or paths outside the registered workspace.
+Apps cannot use `import`, `require`, Node.js filesystem APIs, `process`, child processes, shell commands, native binaries, installed npm packages, secrets, or paths outside the registered workspace.
 
 ## Workspace API
 
@@ -36,8 +36,8 @@ All paths are relative to the registered workspace. Attempts to leave it with ab
 - `await workspace.write(path, data)` writes a string, bytes, or JSON-serializable value. Missing parent folders are created automatically.
 
 ```js
-const source = await workspace.read('scripts/example/inputs/source.txt');
-await workspace.write('scripts/example/outputs/result.txt', source.toUpperCase());
+const source = await workspace.read('apps/example/inputs/source.txt');
+await workspace.write('apps/example/outputs/result.txt', source.toUpperCase());
 ```
 
 ### Binary files
@@ -70,14 +70,14 @@ const data = await response.json();
 ## Run log
 
 - `run.log(message)` adds a message to the completed run.
-- `console.log(...)` also writes a message to the run log.
-- Runlet keeps the 50 most recent successful and failed runs for each Script.
+- `console.log(...)`, `console.info(...)`, `console.warn(...)`, and `console.error(...)` also write readable messages to the run log.
+- Runlet keeps the 50 most recent successful and failed runs for each App.
 - Each saved run includes its time, duration, log messages, and final error when one occurs.
-- Run history is size-limited and stored in a hidden Runlet-managed folder inside the Script.
+- Run history is size-limited and stored in a hidden Runlet-managed folder inside the App.
 
 ## Workspace data tables
 
-Every Inbox has a table in the workspace database. Use `data` when a Script needs those records. The table name is shown in Runlet's Data area and is also returned when the Inbox is inspected.
+Every Inbox has a table in the workspace database. Use `data` when an App needs those records. The table name is shown in Runlet's Data area and is also returned when the Inbox is inspected.
 
 - `await data.listTables()` returns the available tables and their columns.
 - `await data.read(table, options)` returns rows as plain objects. `options` may include `limit` and `offset`.
@@ -103,9 +103,9 @@ run.log(`The table now has ${prices.length + 1} rows`);
 - It does not perform OCR. Image-only scanned PDFs require a separate OCR service or AI workflow.
 
 ```js
-const source = await workspace.readBytes('scripts/invoices/inputs/invoice.pdf');
+const source = await workspace.readBytes('apps/invoices/inputs/invoice.pdf');
 const text = await pdf.extractText(source);
-await workspace.write('scripts/invoices/outputs/invoice.txt', text);
+await workspace.write('apps/invoices/outputs/invoice.txt', text);
 ```
 
 ## CSV helpers
@@ -133,7 +133,7 @@ const archive = zip.create({
   'summary.txt': 'Complete',
   'results.csv': csv.stringify([['name', 'value'], ['Example', '1']]),
 });
-await workspace.writeBytes('scripts/example/outputs/results.zip', archive);
+await workspace.writeBytes('apps/example/outputs/results.zip', archive);
 ```
 
 The ZIP helper uses the bundled `fflate` library.
@@ -153,14 +153,14 @@ const workbook = await xlsx.create({
     ['Walnuts', 46.17],
   ],
 });
-await workspace.writeBytes('scripts/example/outputs/prices.xlsx', workbook);
+await workspace.writeBytes('apps/example/outputs/prices.xlsx', workbook);
 
-const source = await workspace.readBytes('scripts/example/inputs/source.xlsx');
+const source = await workspace.readBytes('apps/example/inputs/source.xlsx');
 const data = await xlsx.read(source);
 run.log(`Read ${data.sheets.length} sheets`);
 ```
 
-The Excel helper uses the bundled `exceljs` library. It intentionally exposes rows rather than ExcelJS objects, keeping Script data portable and safe.
+The Excel helper uses the bundled `exceljs` library. It intentionally exposes rows rather than ExcelJS objects, keeping App data portable and safe.
 
 ## Word helper
 
@@ -170,19 +170,19 @@ The Excel helper uses the bundled `exceljs` library. It intentionally exposes ro
 - Formatting, images, comments, and tracked-change details are not preserved.
 
 ```js
-const source = await workspace.readBytes('scripts/example/inputs/report.docx');
+const source = await workspace.readBytes('apps/example/inputs/report.docx');
 const text = await docx.extractText(source);
-await workspace.write('scripts/example/outputs/report.txt', text);
+await workspace.write('apps/example/outputs/report.txt', text);
 ```
 
 The Word helper uses the bundled `mammoth` library.
 
 ## Safe JavaScript globals
 
-Script code can use:
+App code can use:
 
 - standard JavaScript language features supported by Runlet's bundled runtime;
-- `console.log`;
+- `console.log`, `console.info`, `console.warn`, and `console.error`;
 - `setTimeout` and `clearTimeout`;
 - `TextEncoder` and `TextDecoder`;
 - `URL`.
@@ -191,16 +191,16 @@ Dynamic string code generation and WebAssembly compilation are disabled.
 
 ## Limits
 
-- A Script run has a 30-second time limit.
+- An App run has a 30-second time limit.
 - The worker has a 128 MB old-generation and 32 MB young-generation memory limit.
-- Generated files should be written beneath that Script's `outputs/` folder.
+- Generated files should be written beneath that App's `outputs/` folder.
 - User-supplied source files should be kept beneath `inputs/` or another explicitly named workspace path.
 
 ## Complete example
 
 ```js
 export default async function ({ workspace, run, data, pdf }) {
-  const source = await workspace.readBytes('scripts/invoice-import/inputs/invoice.pdf');
+  const source = await workspace.readBytes('apps/invoice-import/inputs/invoice.pdf');
   const text = await pdf.extractText(source);
   await data.upsert('invoices', { source_file: 'invoice.pdf', text }, ['source_file']);
   run.log('Saved invoice.pdf to the invoices table');

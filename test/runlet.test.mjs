@@ -50,12 +50,16 @@ test.after(async () => {
   await fs.rm(temporaryRoot, { recursive: true, force: true });
 });
 
-test('creates a workspace with separate Scripts and Prompts folders', async () => {
+test('creates a workspace with separate Apps and Prompts folders', async () => {
   const workspace = await runlet.createWorkspace({ name: 'Test', folderPath: path.join(temporaryRoot, 'workspace'), create: true });
   assert.equal((await runlet.getCurrentWorkspace()).id, workspace.id);
-  assert.equal((await fs.stat(path.join(workspace.path, 'scripts'))).isDirectory(), true);
+  assert.equal((await fs.stat(path.join(workspace.path, 'apps'))).isDirectory(), true);
   assert.equal((await fs.stat(path.join(workspace.path, 'prompts'))).isDirectory(), true);
   assert.ok((await fs.stat(path.join(workspace.path, '.runlet', 'workspace.sqlite'))).isFile());
+  const template = runlet.getAppTemplate(true);
+  assert.ok(template.structure.includes('index.html'));
+  assert.match(template.rules.join(' '), /portable to another Runlet installation/);
+  assert.match(template.rules.join(' '), /50 most recent successful and failed runs/);
 });
 
 test('creates folders and safely moves files within a workspace', async () => {
@@ -129,7 +133,7 @@ test('configures, pauses, repairs, and discovers Inboxes safely', async () => {
   assert.equal(updated.instructions, '# Invoice instructions\n\nExtract the total.\n');
   assert.equal(await runlet.readFile(current.id, 'Invoices/INSTRUCTIONS.md'), updated.instructions);
   await assert.rejects(runlet.getInbox(current.id, 'not-an-inbox'), /not found/i);
-  await assert.rejects(runlet.updateInboxInstructions(current.id, 'scripts', '# No'), /not an Inbox/i);
+  await assert.rejects(runlet.updateInboxInstructions(current.id, 'apps', '# No'), /not an Inbox/i);
 
   await runlet.deleteFile(current.id, 'Invoices/INSTRUCTIONS.md');
   const listed = (await runlet.listFiles(current.id)).find((item) => item.name === 'Invoices');
@@ -143,7 +147,7 @@ test('configures, pauses, repairs, and discovers Inboxes safely', async () => {
 
   const repaired = await runlet.setupInbox(current.id, 'Invoices', { repair: true });
   assert.equal(repaired.status, 'ready');
-  await assert.rejects(runlet.setupInbox(current.id, 'scripts'), /Scripts and Prompts/i);
+  await assert.rejects(runlet.setupInbox(current.id, 'apps'), /Apps and Prompts/i);
   await assert.rejects(runlet.setupInbox(current.id, 'Invoices/processed'), /result folders/i);
   await runlet.deleteFile(current.id, 'Invoices');
   assert.deepEqual(await runlet.listDataTables(current.id), []);
@@ -216,12 +220,12 @@ test('requires unique workspace names and renames without deleting folders', asy
   await runlet.selectWorkspace(first.id);
 });
 
-test('creates and runs a Script', async () => {
+test('creates and runs an App with bounded success and failure logs', async () => {
   const current = await runlet.getCurrentWorkspace();
   await runlet.makeDirectory(current.id, 'Recipes');
   const recipeInbox = await runlet.setupInbox(current.id, 'Recipes');
   await runlet.writeDataRows(current.id, recipeInbox.table, [{ recipe: 'Sourdough' }, { recipe: 'Baguette' }, { recipe: 'Sourdough' }]);
-  await runlet.createScript({
+  await runlet.createApp({
     workspaceId: current.id,
     slug: 'copy-text',
     name: 'Recipe Message',
@@ -232,62 +236,65 @@ test('creates and runs a Script', async () => {
     ],
     results: [{ type: 'summary', label: 'Result', path: 'outputs/result.txt' }],
     readme: '# Copy Text\n\nCopy one input into an output.\n',
+    indexHtml: '<!doctype html><title>Recipe Message</title><main>Recipe Message</main>',
     runJs: `export default async function ({ workspace, run, input, data }) {
       const recipes = await data.read('${recipeInbox.table}');
       if (!recipes.some((row) => row.recipe === input.recipe)) throw new Error('Recipe not found.');
-      await workspace.write('scripts/copy-text/outputs/result.txt', input.recipe + ': ' + input.message.toUpperCase());
+      await workspace.write('apps/copy-text/outputs/result.txt', input.recipe + ': ' + input.message.toUpperCase());
+      console.log('Preparing', { recipe: input.recipe });
       run.log('Created message.');
       if (input.message === 'fail') throw new Error('Deliberate failure.');
     }`,
   });
-  const listed = await runlet.getScript(current.id, 'copy-text');
+  const listed = await runlet.getApp(current.id, 'copy-text');
+  assert.equal(listed.hasPage, true);
   assert.deepEqual(listed.controls[0].options, ['Baguette', 'Sourdough']);
-  const result = await runlet.runScript(current.id, 'copy-text', { recipe: 'Sourdough', message: 'hello' });
+  const result = await runlet.runApp(current.id, 'copy-text', { recipe: 'Sourdough', message: 'hello' });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.logs, ['Created message.']);
-  assert.equal(await runlet.readFile(current.id, 'scripts/copy-text/outputs/result.txt'), 'Sourdough: HELLO');
-  assert.equal((await runlet.getScriptResults(current.id, 'copy-text'))[0].content, 'Sourdough: HELLO');
+  assert.deepEqual(result.logs, ['Preparing {"recipe":"Sourdough"}', 'Created message.']);
+  assert.equal(await runlet.readFile(current.id, 'apps/copy-text/outputs/result.txt'), 'Sourdough: HELLO');
+  assert.equal((await runlet.getAppResults(current.id, 'copy-text'))[0].content, 'Sourdough: HELLO');
 
-  let history = await runlet.getScriptRunHistory(current.id, 'copy-text');
+  let history = await runlet.getAppRunHistory(current.id, 'copy-text');
   assert.equal(history.length, 1);
   assert.equal(history[0].status, 'completed');
-  assert.deepEqual(history[0].logs, ['Created message.']);
+  assert.deepEqual(history[0].logs, ['Preparing {"recipe":"Sourdough"}', 'Created message.']);
 
   await assert.rejects(
-    runlet.runScript(current.id, 'copy-text', { recipe: 'Sourdough', message: 'fail' }),
+    runlet.runApp(current.id, 'copy-text', { recipe: 'Sourdough', message: 'fail' }),
     /Deliberate failure/,
   );
-  history = await runlet.getScriptRunHistory(current.id, 'copy-text');
+  history = await runlet.getAppRunHistory(current.id, 'copy-text');
   assert.equal(history[0].status, 'failed');
   assert.equal(history[0].error, 'Deliberate failure.');
-  assert.deepEqual(history[0].logs, ['Created message.']);
+  assert.deepEqual(history[0].logs, ['Preparing {"recipe":"Sourdough"}', 'Created message.']);
   assert.match(history[0].details, /run\.js/);
-  assert.equal((await runlet.listFiles(current.id, 'scripts/copy-text')).some((item) => item.name === '.runlet'), false);
+  assert.equal((await runlet.listFiles(current.id, 'apps/copy-text')).some((item) => item.name === '.runlet'), false);
 
   for (let index = 0; index < 50; index += 1) {
-    await runlet.runScript(current.id, 'copy-text', { recipe: 'Sourdough', message: `run-${index}` });
+    await runlet.runApp(current.id, 'copy-text', { recipe: 'Sourdough', message: `run-${index}` });
   }
-  history = await runlet.getScriptRunHistory(current.id, 'copy-text');
+  history = await runlet.getAppRunHistory(current.id, 'copy-text');
   assert.equal(history.length, 50);
   assert.ok(history.every((run) => run.status === 'completed'));
 
-  const renamed = await runlet.updateScriptMetadata(current.id, 'copy-text', { name: 'Recipe Note', description: 'Make a short recipe note.' });
+  const renamed = await runlet.updateAppMetadata(current.id, 'copy-text', { name: 'Recipe Note', description: 'Make a short recipe note.' });
   assert.equal(renamed.name, 'Recipe Note');
 
   const binary = Buffer.from([0, 1, 2, 255]);
-  await runlet.writeScriptOutput(current.id, 'copy-text', 'nested/result.bin', binary);
-  assert.deepEqual(await fs.readFile(path.join(current.path, 'scripts/copy-text/outputs/nested/result.bin')), binary);
+  await runlet.writeAppOutput(current.id, 'copy-text', 'nested/result.bin', binary);
+  assert.deepEqual(await fs.readFile(path.join(current.path, 'apps/copy-text/outputs/nested/result.bin')), binary);
 
-  const deleted = await runlet.deleteScript(current.id, 'copy-text');
+  const deleted = await runlet.deleteApp(current.id, 'copy-text');
   assert.equal(deleted.deleted.name, 'Recipe Note');
-  await assert.rejects(runlet.getScript(current.id, 'copy-text'), /Script not found/);
-  await assert.rejects(fs.access(path.join(current.path, 'scripts/copy-text')));
+  await assert.rejects(runlet.getApp(current.id, 'copy-text'), /App not found/);
+  await assert.rejects(fs.access(path.join(current.path, 'apps/copy-text')));
   await runlet.deleteFile(current.id, 'Recipes');
 });
 
-test('Scripts can extract PDF text and use bundled CSV and ZIP helpers', async () => {
+test('Apps can extract PDF text and use bundled CSV and ZIP helpers', async () => {
   const current = await runlet.getCurrentWorkspace();
-  await runlet.createScript({
+  await runlet.createApp({
     workspaceId: current.id,
     slug: 'document-tools',
     name: 'Document Tools',
@@ -295,29 +302,29 @@ test('Scripts can extract PDF text and use bundled CSV and ZIP helpers', async (
     results: [{ type: 'table', label: 'Result', path: 'outputs/result.csv' }],
     readme: '# Document Tools\n\nExercise the bundled document helpers.\n',
     runJs: `export default async function ({ workspace, run, pdf, csv, zip }) {
-      const source = await workspace.readBytes('scripts/document-tools/inputs/invoice.pdf');
+      const source = await workspace.readBytes('apps/document-tools/inputs/invoice.pdf');
       const text = await pdf.extractText(source);
       const archive = zip.create({ 'invoice.txt': text });
-      await workspace.writeBytes('scripts/document-tools/outputs/invoice.zip', archive);
+      await workspace.writeBytes('apps/document-tools/outputs/invoice.zip', archive);
       const restored = zip.extract(archive);
       const restoredText = new TextDecoder().decode(restored['invoice.txt']);
       const rows = csv.parse('name,quantity\\nWalnuts,4\\n', { columns: true });
       rows.push({ name: restoredText, quantity: 1 });
-      await workspace.write('scripts/document-tools/outputs/result.csv', csv.stringify(rows, { header: true, columns: ['name', 'quantity'] }));
+      await workspace.write('apps/document-tools/outputs/result.csv', csv.stringify(rows, { header: true, columns: ['name', 'quantity'] }));
       run.log('Processed invoice.pdf');
     }`,
   });
-  await runlet.writeScriptInput(current.id, 'document-tools', 'invoice.pdf', simplePdf('Invoice BAK-0020'));
+  await runlet.writeAppInput(current.id, 'document-tools', 'invoice.pdf', simplePdf('Invoice BAK-0020'));
 
-  const result = await runlet.runScript(current.id, 'document-tools');
+  const result = await runlet.runApp(current.id, 'document-tools');
   assert.deepEqual(result.logs, ['Processed invoice.pdf']);
-  assert.match(await runlet.readFile(current.id, 'scripts/document-tools/outputs/result.csv'), /Invoice BAK-0020,1/);
-  assert.ok((await fs.stat(path.join(current.path, 'scripts/document-tools/outputs/invoice.zip'))).size > 0);
+  assert.match(await runlet.readFile(current.id, 'apps/document-tools/outputs/result.csv'), /Invoice BAK-0020,1/);
+  assert.ok((await fs.stat(path.join(current.path, 'apps/document-tools/outputs/invoice.zip'))).size > 0);
 });
 
-test('Scripts can create and read XLSX files and extract DOCX text', async () => {
+test('Apps can create and read XLSX files and extract DOCX text', async () => {
   const current = await runlet.getCurrentWorkspace();
-  await runlet.createScript({
+  await runlet.createApp({
     workspaceId: current.id,
     slug: 'office-tools',
     name: 'Office Tools',
@@ -325,23 +332,23 @@ test('Scripts can create and read XLSX files and extract DOCX text', async () =>
     readme: '# Office Tools\n\nExercise the bundled Excel and Word helpers.\n',
     runJs: `export default async function ({ workspace, run, xlsx, docx }) {
       const workbook = await xlsx.create({ Prices: [['ingredient', 'price'], ['Walnuts', 46.17]] });
-      await workspace.writeBytes('scripts/office-tools/outputs/prices.xlsx', workbook);
+      await workspace.writeBytes('apps/office-tools/outputs/prices.xlsx', workbook);
       const restored = await xlsx.read(workbook);
-      const word = await workspace.readBytes('scripts/office-tools/inputs/note.docx');
+      const word = await workspace.readBytes('apps/office-tools/inputs/note.docx');
       const text = await docx.extractText(word);
-      await workspace.write('scripts/office-tools/outputs/result.json', { sheets: restored.sheets, text: text.trim() });
+      await workspace.write('apps/office-tools/outputs/result.json', { sheets: restored.sheets, text: text.trim() });
       run.log('Processed Excel and Word files.');
     }`,
   });
-  await runlet.writeScriptInput(current.id, 'office-tools', 'note.docx', simpleDocx('Runlet Word helper'));
+  await runlet.writeAppInput(current.id, 'office-tools', 'note.docx', simpleDocx('Runlet Word helper'));
 
-  const result = await runlet.runScript(current.id, 'office-tools');
+  const result = await runlet.runApp(current.id, 'office-tools');
   assert.deepEqual(result.logs, ['Processed Excel and Word files.']);
-  const output = JSON.parse(await runlet.readFile(current.id, 'scripts/office-tools/outputs/result.json'));
+  const output = JSON.parse(await runlet.readFile(current.id, 'apps/office-tools/outputs/result.json'));
   assert.equal(output.sheets[0].name, 'Prices');
   assert.deepEqual(output.sheets[0].rows, [['ingredient', 'price'], ['Walnuts', 46.17]]);
   assert.equal(output.text, 'Runlet Word helper');
-  assert.ok((await fs.stat(path.join(current.path, 'scripts/office-tools/outputs/prices.xlsx'))).size > 0);
+  assert.ok((await fs.stat(path.join(current.path, 'apps/office-tools/outputs/prices.xlsx'))).size > 0);
 });
 
 test('creates, lists, and edits a reusable Prompt', async () => {
@@ -367,10 +374,10 @@ test('creates, lists, and edits a reusable Prompt', async () => {
   await assert.rejects(fs.access(path.join(current.path, 'prompts/extract-invoice')));
 });
 
-test('saves custom Script and Prompt ordering', async () => {
+test('saves custom App and Prompt ordering', async () => {
   const current = await runlet.getCurrentWorkspace();
-  for (const [slug, name] of [['alpha-script', 'Alpha Script'], ['zulu-script', 'Zulu Script']]) {
-    await runlet.createScript({
+  for (const [slug, name] of [['alpha-app', 'Alpha App'], ['zulu-app', 'Zulu App']]) {
+    await runlet.createApp({
       workspaceId: current.id,
       slug,
       name,
@@ -379,11 +386,11 @@ test('saves custom Script and Prompt ordering', async () => {
       runJs: 'export default async function () {}',
     });
   }
-  const scriptOrder = ['zulu-script', 'office-tools', 'document-tools', 'alpha-script'];
-  const scripts = await runlet.reorderItems(current.id, 'scripts', scriptOrder);
-  assert.deepEqual(scripts.map((item) => item.slug), scriptOrder);
-  assert.deepEqual((await runlet.listScripts(current.id)).map((item) => item.slug), scriptOrder);
-  await assert.rejects(runlet.reorderItems(current.id, 'scripts', ['zulu-script', 'zulu-script']), /changed/i);
+  const appOrder = ['zulu-app', 'office-tools', 'document-tools', 'alpha-app'];
+  const apps = await runlet.reorderItems(current.id, 'apps', appOrder);
+  assert.deepEqual(apps.map((item) => item.slug), appOrder);
+  assert.deepEqual((await runlet.listApps(current.id)).map((item) => item.slug), appOrder);
+  await assert.rejects(runlet.reorderItems(current.id, 'apps', ['zulu-app', 'zulu-app']), /changed/i);
 
   for (const [slug, name] of [['first-prompt', 'First Prompt'], ['second-prompt', 'Second Prompt']]) {
     await runlet.createPrompt({
@@ -437,7 +444,8 @@ test('detects an installed Claude extension as connected', async () => {
     assert.equal(status.name, 'Claude');
     assert.equal(status.connected, true);
     assert.equal(status.status, 'Connected');
-    assert.equal(status.actionLabel, 'Reinstall');
+    assert.equal(status.action, 'manage');
+    assert.equal(status.actionLabel, 'Manage in Claude');
   } finally {
     delete process.env.RUNLET_CLAUDE_DATA_DIR;
   }
@@ -449,13 +457,13 @@ test('shows version and update commands in the CLI', async () => {
   const helpResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'help']);
   assert.match(helpResult.stdout, /runlet update\s+Check for and install the latest release/);
   assert.match(helpResult.stdout, /runlet tools\s+Show the tools provided to connected AI apps/);
-  assert.match(helpResult.stdout, /runlet libraries\s+Show the JavaScript APIs available to Scripts/);
+  assert.match(helpResult.stdout, /runlet libraries\s+Show the JavaScript APIs available to Apps/);
   const toolsResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'tools']);
   assert.match(toolsResult.stdout, /Runlet tools provided to connected AI apps/);
   assert.match(toolsResult.stdout, /list_inboxes\s+List enabled Runlet Inboxes/);
   assert.match(toolsResult.stdout, /get_inbox\s+Inspect one configured Inbox/);
   assert.match(toolsResult.stdout, /update_inbox_instructions\s+Create or replace the instructions/);
-  assert.match(toolsResult.stdout, /run_script\s+Run a local Script/);
+  assert.match(toolsResult.stdout, /run_app\s+Run an App/);
   assert.match(toolsResult.stdout, /create_prompt\s+Create a reusable provider-neutral Prompt/);
   assert.match(toolsResult.stdout, /only explicitly registered Runlet workspaces/);
   const librariesResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'libraries']);
@@ -463,6 +471,6 @@ test('shows version and update commands in the CLI', async () => {
   assert.match(librariesResult.stdout, /csv\.parse \/ stringify/);
   assert.match(librariesResult.stdout, /xlsx\.read \/ create/);
   assert.match(librariesResult.stdout, /docx\.extractText/);
-  assert.match(librariesResult.stdout, /Scripts cannot import packages/);
-  assert.match(librariesResult.stdout, /SCRIPTING\.md/);
+  assert.match(librariesResult.stdout, /Apps cannot import packages/);
+  assert.match(librariesResult.stdout, /APPS\.md/);
 });

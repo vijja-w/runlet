@@ -6,9 +6,30 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { stringify as stringifyCsv } from 'csv-stringify/sync';
 import { unzipSync, zipSync, strToU8 } from 'fflate';
-import { createScriptDataApi } from './database.mjs';
+import { createAppDataApi } from './database.mjs';
 
 const logs = [];
+const maxLogCharacters = 64_000;
+let loggedCharacters = 0;
+
+function formatLogValue(value) {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && typeof value.message === 'string') return value.stack || value.message;
+  try {
+    const encoded = JSON.stringify(value);
+    return encoded === undefined ? String(value) : encoded;
+  }
+  catch { return String(value); }
+}
+
+function recordLog(values, prefix = '') {
+  if (loggedCharacters >= maxLogCharacters) return;
+  const message = `${prefix}${values.map(formatLogValue).join(' ')}`;
+  const remaining = maxLogCharacters - loggedCharacters;
+  const saved = message.length <= remaining ? message : `${message.slice(0, Math.max(0, remaining - 14))}\n…truncated…`;
+  logs.push(saved);
+  loggedCharacters += saved.length;
+}
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pdfAssetsRoot = path.join(packageRoot, 'node_modules', 'pdfjs-dist');
 let pdfJs;
@@ -41,7 +62,7 @@ async function loadMammoth() {
 function inside(relativePath) {
   const root = path.resolve(workerData.workspacePath);
   const target = path.resolve(root, String(relativePath).replace(/^[/\\]+/, ''));
-  if (target !== root && !target.startsWith(`${root}${path.sep}`)) throw new Error('Action attempted to access a path outside the workspace.');
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) throw new Error('App attempted to access a path outside the workspace.');
   return target;
 }
 
@@ -67,7 +88,7 @@ const workspace = Object.freeze({
   delete: (target) => fs.rm(inside(target), { recursive: true }),
   fetch: async (url, options = {}) => { if (!/^https:\/\//i.test(url)) throw new Error('Only HTTPS requests are allowed.'); const response = await fetch(url, { ...options, signal: AbortSignal.timeout(10_000) }); return { ok: response.ok, status: response.status, text: () => response.text(), json: () => response.json() }; },
 });
-const run = Object.freeze({ log(message) { logs.push(String(message)); } });
+const run = Object.freeze({ log(...values) { recordLog(values); } });
 const pdf = Object.freeze({
   async extractText(data) {
     const { getDocument } = await loadPdfJs();
@@ -160,15 +181,27 @@ const docx = Object.freeze({
 });
 
 try {
-  const source = await fs.readFile(path.join(workerData.actionDir, 'run.js'), 'utf8');
+  const source = await fs.readFile(path.join(workerData.appDir, 'run.js'), 'utf8');
   if (!/export\s+default/.test(source)) throw new Error('run.js must export one default function.');
   const transformed = `let __action; ${source.replace(/export\s+default/, '__action =')}\n;__action;`;
-  const context = vm.createContext({ console: Object.freeze({ log: (...values) => logs.push(values.join(' ')) }), setTimeout, clearTimeout, TextEncoder, TextDecoder, URL }, { codeGeneration: { strings: false, wasm: false } });
-  const action = new vm.Script(transformed, { filename: 'run.js' }).runInContext(context, { timeout: 1_000 });
-  if (typeof action !== 'function') throw new Error('The default export in run.js must be a function.');
-  const data = createScriptDataApi(workerData.workspacePath);
-  await action({ workspace, run, input: Object.freeze({ ...(workerData.input || {}) }), data, pdf, csv, zip, xlsx, docx });
-  parentPort.postMessage({ ok: true, kind: 'script', status: 'completed', logs });
+  const context = vm.createContext({
+    console: Object.freeze({
+      log: (...values) => recordLog(values),
+      info: (...values) => recordLog(values),
+      warn: (...values) => recordLog(values, 'Warning: '),
+      error: (...values) => recordLog(values, 'Error: '),
+    }),
+    setTimeout,
+    clearTimeout,
+    TextEncoder,
+    TextDecoder,
+    URL,
+  }, { codeGeneration: { strings: false, wasm: false } });
+  const appFunction = new vm.Script(transformed, { filename: 'run.js' }).runInContext(context, { timeout: 1_000 });
+  if (typeof appFunction !== 'function') throw new Error('The default export in run.js must be a function.');
+  const data = createAppDataApi(workerData.workspacePath);
+  await appFunction({ workspace, run, input: Object.freeze({ ...(workerData.input || {}) }), data, pdf, csv, zip, xlsx, docx });
+  parentPort.postMessage({ ok: true, kind: 'app', status: 'completed', logs });
 } catch (error) {
   const message = error && typeof error.message === 'string' ? error.message : String(error);
   const stack = error && typeof error.stack === 'string' ? error.stack : '';

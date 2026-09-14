@@ -137,8 +137,8 @@ export async function claudeDesktopStatus() {
     available: Boolean(application || installation),
     connected,
     status: connected ? 'Connected' : application ? 'Ready to install' : 'Not installed',
-    action: 'install',
-    actionLabel: connected ? 'Reinstall' : 'Install',
+    action: connected ? 'manage' : 'install',
+    actionLabel: connected ? 'Manage in Claude' : 'Install',
     note: connected
       ? 'Runlet is installed as a local Claude extension. Manage or remove it in Claude settings.'
       : application
@@ -163,8 +163,8 @@ export async function createClaudeDesktopExtension() {
     name: 'runlet-local',
     display_name: 'Runlet',
     version: metadata.version,
-    description: 'Use registered Runlet workspaces, Scripts, and Prompts from Claude Desktop.',
-    long_description: 'Runlet keeps local workspace files, small Scripts, and reusable Prompts together. This extension connects Claude Desktop to the Runlet installation on this computer.',
+    description: 'Use registered Runlet workspaces, Apps, and Prompts from Claude Desktop.',
+    long_description: 'Runlet keeps local workspace files, small Apps, and reusable Prompts together. This extension connects Claude Desktop to the Runlet installation on this computer.',
     author: { name: 'Runlet' },
     repository: { type: 'git', url: 'https://github.com/vijja-w/runlet' },
     homepage: 'https://github.com/vijja-w/runlet',
@@ -178,7 +178,7 @@ export async function createClaudeDesktopExtension() {
       },
     },
     tools_generated: true,
-    keywords: ['local', 'workspace', 'scripts', 'prompts'],
+    keywords: ['local', 'workspace', 'apps', 'prompts'],
     compatibility: { platforms: [process.platform] },
   };
   const archive = zipSync({
@@ -196,6 +196,12 @@ async function openClaudeDesktopExtension(application) {
   else if (process.platform === 'win32') await run('cmd.exe', ['/d', '/s', '/c', 'start', '', bundlePath]);
   else await run('xdg-open', [bundlePath]);
   return bundlePath;
+}
+
+async function openClaudeDesktop(application) {
+  if (process.platform === 'darwin') await run('/usr/bin/open', ['-a', application]);
+  else if (process.platform === 'win32') await run('cmd.exe', ['/d', '/s', '/c', 'start', '', application]);
+  else await run(application, []);
 }
 
 export async function listConnections() {
@@ -218,6 +224,13 @@ export async function connect(provider) {
   if (provider === 'claude-desktop') {
     const application = await findClaudeDesktop();
     if (!application) throw new Error('Claude is not installed on this computer.');
+    if ((await claudeDesktopStatus()).connected) {
+      await openClaudeDesktop(application);
+      return {
+        ...await claudeDesktopStatus(),
+        message: 'Opened Claude. Manage or remove Runlet in Claude settings.',
+      };
+    }
     await openClaudeDesktopExtension(application);
     return {
       ...await claudeDesktopStatus(),

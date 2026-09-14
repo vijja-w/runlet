@@ -27,7 +27,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const stateDir = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet');
 const statePath = path.join(stateDir, 'state.json');
 const legacyStatePath = path.join(appRoot, '.workshop', 'state.json');
-const workerPath = path.join(appRoot, 'src', 'action-worker.mjs');
+const workerPath = path.join(appRoot, 'src', 'app-worker.mjs');
 const runHistoryLimit = 50;
 const runHistoryEntryLimit = 64_000;
 const runHistoryWrites = new Map();
@@ -75,7 +75,7 @@ function slugify(value) {
 
 function actionSlug(value) {
   const slug = slugify(value);
-  if (slug !== value) throw new Error('Action slug must use lower-case letters, numbers, and hyphens.');
+  if (slug !== value) throw new Error('App slug must use lower-case letters, numbers, and hyphens.');
   return slug;
 }
 
@@ -110,14 +110,14 @@ function boundedLogs(logs) {
   return kept;
 }
 
-function runHistoryPath(scriptDirectory) {
-  return path.join(scriptDirectory, '.runlet', 'runs.jsonl');
+function runHistoryPath(appDirectory) {
+  return path.join(appDirectory, '.runlet', 'runs.jsonl');
 }
 
-async function appendScriptRun(scriptDirectory, entry) {
-  const previous = runHistoryWrites.get(scriptDirectory) || Promise.resolve();
+async function appendAppRun(appDirectory, entry) {
+  const previous = runHistoryWrites.get(appDirectory) || Promise.resolve();
   const next = previous.catch(() => {}).then(async () => {
-    const target = runHistoryPath(scriptDirectory);
+    const target = runHistoryPath(appDirectory);
     const history = (await fs.readFile(target, 'utf8').catch(() => ''))
       .split('\n')
       .filter(Boolean)
@@ -127,9 +127,9 @@ async function appendScriptRun(scriptDirectory, entry) {
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, `${history.slice(-runHistoryLimit).map((run) => JSON.stringify(run)).join('\n')}\n`);
   });
-  runHistoryWrites.set(scriptDirectory, next);
+  runHistoryWrites.set(appDirectory, next);
   try { await next; }
-  finally { if (runHistoryWrites.get(scriptDirectory) === next) runHistoryWrites.delete(scriptDirectory); }
+  finally { if (runHistoryWrites.get(appDirectory) === next) runHistoryWrites.delete(appDirectory); }
 }
 
 export async function listWorkspaces() {
@@ -149,7 +149,7 @@ export async function createWorkspace({ name, folderPath, create = false }) {
   if (!exists && !create) throw new Error('That folder does not exist. Choose an existing folder.');
   if (!exists) await fs.mkdir(resolved, { recursive: true });
   if (state.workspaces.some((workspace) => workspace.path === resolved)) throw new Error('That folder is already a workspace.');
-  await fs.mkdir(path.join(resolved, 'scripts'), { recursive: true });
+  await fs.mkdir(path.join(resolved, 'apps'), { recursive: true });
   await fs.mkdir(path.join(resolved, 'prompts'), { recursive: true });
   await ensureWorkspaceDatabase(resolved);
   const workspaceFile = path.join(resolved, 'workspace.md');
@@ -297,7 +297,7 @@ async function inboxProtectionReason(workspaceRoot, relativePath) {
   const relative = path.relative(workspaceRoot, resolveInside(workspaceRoot, relativePath));
   if (!relative) return 'The workspace folder cannot become an Inbox.';
   const parts = relative.split(path.sep);
-  if (parts[0] === 'scripts' || parts[0] === 'prompts') return 'Runlet Scripts and Prompts cannot become Inboxes.';
+  if (parts[0] === 'apps' || parts[0] === 'prompts') return 'Runlet Apps and Prompts cannot become Inboxes.';
   for (let index = 1; index < parts.length; index += 1) {
     const ancestor = path.join(workspaceRoot, ...parts.slice(0, index));
     const manifest = await readInboxManifest(ancestor);
@@ -409,7 +409,7 @@ async function ensureInboxArtifacts(directory, config) {
 function parseReadme(markdown, fallbackName) {
   const title = markdown.match(/^#\s+(.+)$/m)?.[1]?.trim() || fallbackName;
   const withoutTitle = markdown.replace(/^#\s+.+$/m, '').trim();
-  const description = withoutTitle.split(/\n\s*\n/).find((part) => !part.trim().startsWith('#'))?.replace(/[*_`]/g, '').trim() || 'A reusable workspace Action.';
+  const description = withoutTitle.split(/\n\s*\n/).find((part) => !part.trim().startsWith('#'))?.replace(/[*_`]/g, '').trim() || 'A reusable App.';
   const howBlock = markdown.match(/##\s+How to use\s*\n([\s\S]*?)(?=\n##\s|$)/i)?.[1] || '';
   const steps = [...howBlock.matchAll(/^\s*\d+\.\s+(.+)$/gm)].map((match) => match[1].replace(/\*\*/g, '').trim());
   return { title, description, steps, markdown };
@@ -477,110 +477,20 @@ async function hydrateControls(workspacePath, controls = []) {
   }));
 }
 
-export async function listActions(workspaceId) {
-  const workspace = await getWorkspace(workspaceId);
-  const actionsRoot = resolveInside(workspace.path, 'actions');
-  await fs.mkdir(actionsRoot, { recursive: true });
-  const entries = await fs.readdir(actionsRoot, { withFileTypes: true });
-  const actions = [];
-  for (const entry of entries.filter((item) => item.isDirectory())) {
-    const directory = path.join(actionsRoot, entry.name);
-    if (!(await fs.access(path.join(directory, 'run.js')).then(() => true).catch(() => false))) continue;
-    const readme = await fs.readFile(path.join(directory, 'README.md'), 'utf8').catch(() => `# ${entry.name}\n\nA reusable workspace Action.`);
-    const info = parseReadme(readme, entry.name);
-    const kind = await fs.access(path.join(directory, 'PROMPT.md')).then(() => 'ai').catch(() => 'script');
-    const outputs = await listRelativeFiles(path.join(directory, 'outputs'));
-    const inputs = await listRelativeFiles(path.join(directory, 'inputs'));
-    actions.push({ slug: entry.name, name: info.title, description: info.description, steps: info.steps, readme: info.markdown, kind, inputs, hasView: await fs.access(path.join(directory, 'index.html')).then(() => true).catch(() => false), outputs });
-  }
-  return actions.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-export async function getAction(workspaceId, slug) {
-  const actions = await listActions(workspaceId);
-  const action = actions.find((item) => item.slug === slug);
-  if (!action) throw new Error('Action not found.');
-  if (action.kind === 'ai') {
-    const workspace = await getWorkspace(workspaceId);
-    action.prompt = await fs.readFile(resolveInside(workspace.path, path.join('actions', slug, 'PROMPT.md')), 'utf8');
-  }
-  return action;
-}
-
-export async function runAction(workspaceId, slug) {
-  const workspace = await getWorkspace(workspaceId);
-  const action = await getAction(workspace.id, slug);
-  if (action.kind === 'ai') {
-    return {
-      ok: true,
-      kind: 'ai',
-      status: 'instructions_ready',
-      workspace: { id: workspace.id, name: workspace.name },
-      action: { slug: action.slug, name: action.name },
-      prompt: action.prompt,
-      inputFiles: action.inputs.map((name) => path.join('actions', slug, 'inputs', name)),
-      outputDirectory: path.join('actions', slug, 'outputs'),
-      nextStep: 'Carry out the prompt using only this registered workspace. Read inputs through Runlet, write generated files only beneath outputDirectory, inspect them, then call finish_ai_action.',
-    };
-  }
-  const actionDir = resolveInside(workspace.path, path.join('actions', slug));
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(workerPath, { workerData: { workspacePath: workspace.path, actionDir }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 } });
-    const timer = setTimeout(() => { worker.terminate(); reject(new Error('Action exceeded the 30 second time limit.')); }, 30_000);
-    worker.once('message', (message) => { clearTimeout(timer); message.ok ? resolve(message) : reject(new Error(message.error)); });
-    worker.once('error', (error) => { clearTimeout(timer); reject(error); });
-  });
-}
-
-export async function finishAiAction(workspaceId, slug, summary = '') {
-  const workspace = await getWorkspace(workspaceId);
-  const action = await getAction(workspace.id, slug);
-  if (action.kind !== 'ai') throw new Error('This is not an AI Action.');
-  const outputs = await listRelativeFiles(resolveInside(workspace.path, path.join('actions', slug, 'outputs')));
-  if (!outputs.length) throw new Error('The AI Action has no outputs yet.');
-  return { ok: true, kind: 'ai', status: 'completed', action: { slug, name: action.name }, outputs, summary: String(summary || '') };
-}
-
-export function getActionTemplate(kind = 'script', withView = false) {
-  if (!['script', 'ai'].includes(kind)) throw new Error('Action kind must be “script” or “ai”.');
-  const shared = {
-    structure: ['README.md', 'run.js', 'inputs/', 'outputs/', ...(withView ? ['index.html'] : [])],
-    rules: [
-      'Use a lower-case kebab-case folder name beneath actions/.',
-      'Keep README.md as short, plain-language usage documentation. The normal browser interface is generated from runlet.json.',
-      'Read source files from inputs/ or another explicitly named workspace path.',
-      'Write every generated file beneath this Action’s outputs/ directory.',
-      'Add index.html only when an interactive page materially helps; it must read relative files from outputs/.',
-    ],
-  };
-  if (kind === 'ai') return {
-    kind,
-    ...shared,
-    structure: ['README.md', 'run.js', 'PROMPT.md', 'inputs/', 'outputs/', ...(withView ? ['index.html'] : [])],
-    runJs: "export default async function ({ run }) {\n  run.log('This AI Action is performed by the connected assistant.');\n}\n",
-    promptGuidance: 'PROMPT.md must state the exact inputs to read, fields or transformation required, exact output paths and formats, and the boundary that generated files belong only in outputs/.',
-  };
-  return {
-    kind,
-    ...shared,
-    runJsGuidance: 'run.js must export one default async function receiving { workspace, run, data, pdf, csv, zip, xlsx, docx }. Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, data.listTables/read/insert/upsert, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log. Do not import modules or access paths outside the registered workspace.',
-  };
-}
-
-export async function listScripts(workspaceId) {
+export async function listApps(workspaceId) {
   const workspace = await getWorkspace(workspaceId);
   const state = await loadState();
-  const scriptsRoot = resolveInside(workspace.path, 'scripts');
-  await fs.mkdir(scriptsRoot, { recursive: true });
-  const entries = await fs.readdir(scriptsRoot, { withFileTypes: true });
-  const scripts = [];
+  const appsRoot = resolveInside(workspace.path, 'apps');
+  await fs.mkdir(appsRoot, { recursive: true });
+  const entries = await fs.readdir(appsRoot, { withFileTypes: true });
+  const apps = [];
   for (const entry of entries.filter((item) => item.isDirectory())) {
-    const directory = path.join(scriptsRoot, entry.name);
+    const directory = path.join(appsRoot, entry.name);
     if (!(await fs.access(path.join(directory, 'run.js')).then(() => true).catch(() => false))) continue;
-    const readme = await fs.readFile(path.join(directory, 'README.md'), 'utf8').catch(() => `# ${entry.name}\n\nA reusable Script.`);
+    const readme = await fs.readFile(path.join(directory, 'README.md'), 'utf8').catch(() => `# ${entry.name}\n\nA reusable App.`);
     const info = parseReadme(readme, entry.name);
     const metadata = await readMetadata(directory, { name: info.title, description: info.description, interface: { controls: [], results: [] } });
-    scripts.push({
+    apps.push({
       slug: entry.name,
       name: metadata.name,
       description: metadata.description,
@@ -588,34 +498,39 @@ export async function listScripts(workspaceId) {
       readme: info.markdown,
       inputs: await listRelativeFiles(path.join(directory, 'inputs')),
       outputs: await listRelativeFiles(path.join(directory, 'outputs')),
-      hasView: await fs.access(path.join(directory, 'index.html')).then(() => true).catch(() => false),
+      hasPage: await fs.access(path.join(directory, 'index.html')).then(() => true).catch(() => false),
       controls: await hydrateControls(workspace.path, metadata.interface?.controls || []),
       results: Array.isArray(metadata.interface?.results) ? metadata.interface.results : [],
     });
   }
-  return applySavedOrder(scripts, state.orders?.[workspace.id]?.scripts);
+  return applySavedOrder(apps, state.orders?.[workspace.id]?.apps);
 }
 
-export async function getScript(workspaceId, slug) {
-  const scripts = await listScripts(workspaceId);
-  const script = scripts.find((item) => item.slug === slug);
-  if (!script) throw new Error('Script not found.');
-  return script;
+export async function getApp(workspaceId, slug) {
+  const apps = await listApps(workspaceId);
+  const app = apps.find((item) => item.slug === slug);
+  if (!app) throw new Error('App not found.');
+  return app;
 }
 
-export function getScriptTemplate(withView = false) {
+export function getAppTemplate(includePage = false) {
   return {
-    structure: ['runlet.json', 'README.md', 'run.js', 'inputs/', 'outputs/', ...(withView ? ['index.html'] : [])],
+    structure: ['runlet.json', 'README.md', 'run.js', 'inputs/', 'outputs/', ...(includePage ? ['index.html'] : [])],
     rules: [
-      'Use a lower-case kebab-case folder name beneath scripts/.',
+      'Use a lower-case kebab-case folder name beneath apps/.',
       'Store the editable display name, description, controls, and result panels in runlet.json.',
-      'Treat README.md as the plain-language user interface.',
+      'Keep README.md as short, plain-language usage documentation.',
       'run.js receives { workspace, run, input, data, pdf, csv, zip, xlsx, docx }. Use input values declared by the controls.',
       'Controls may be text, number, or select. A select may load unique values from a workspace data-table column.',
       'Results may display an outputs/ text file as a summary or an outputs/ CSV file as a table.',
       'Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, data.listTables/read/insert/upsert, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log.',
-      'Write every generated file beneath this Script’s outputs/ directory.',
-      'Runlet generates the normal interactive interface. Add index.html only for a specialized dashboard.',
+      'Write every generated file beneath this App’s outputs/ directory.',
+      'Every App opens on its own page. Runlet generates a compact interface from runlet.json.',
+      'Add index.html when a richer browser interface is materially better. It may use normal browser HTML, CSS, and JavaScript.',
+      'Keep all App assets in the App folder, use relative URLs, and avoid CDNs unless they are genuinely necessary.',
+      'Do not rely on machine-specific paths, dependency installs, native binaries, or a separate server. The App folder must remain portable to another Runlet installation.',
+      'When practical, match Runlet’s quiet visual style: system fonts, neutral surfaces, restrained green accents, rounded controls, and clear spacing.',
+      'Use run.log and console.log for concise progress and debugging messages. Runlet keeps the 50 most recent successful and failed runs.',
     ],
     manifestExample: {
       name: 'Current Recipe Cost',
@@ -628,14 +543,14 @@ export function getScriptTemplate(withView = false) {
   };
 }
 
-export async function createScript({ workspaceId, slug, name, description, controls = [], results = [], readme, runJs, indexHtml, overwrite = false }) {
+export async function createApp({ workspaceId, slug, name, description, controls = [], results = [], readme, runJs, indexHtml, overwrite = false }) {
   const workspace = await getWorkspace(workspaceId);
   const safeSlug = actionSlug(slug);
   if (!String(readme || '').trim().startsWith('# ')) throw new Error('README.md must begin with a level-one title.');
   if (!/export\s+default/.test(String(runJs || ''))) throw new Error('run.js must export one default function.');
-  const directory = resolveInside(workspace.path, path.join('scripts', safeSlug));
+  const directory = resolveInside(workspace.path, path.join('apps', safeSlug));
   const exists = await fs.access(directory).then(() => true).catch(() => false);
-  if (exists && !overwrite) throw new Error('That Script already exists.');
+  if (exists && !overwrite) throw new Error('That App already exists.');
   await fs.mkdir(path.join(directory, 'inputs'), { recursive: true });
   await fs.mkdir(path.join(directory, 'outputs'), { recursive: true });
   await fs.writeFile(path.join(directory, 'README.md'), String(readme));
@@ -647,38 +562,38 @@ export async function createScript({ workspaceId, slug, name, description, contr
     interface: { controls: Array.isArray(controls) ? controls : [], results: Array.isArray(results) ? results : [] },
   });
   if (indexHtml !== undefined) await fs.writeFile(path.join(directory, 'index.html'), String(indexHtml));
-  return getScript(workspace.id, safeSlug);
+  return getApp(workspace.id, safeSlug);
 }
 
-export async function updateScriptMetadata(workspaceId, slug, { name, description }) {
+export async function updateAppMetadata(workspaceId, slug, { name, description }) {
   const workspace = await getWorkspace(workspaceId);
-  const script = await getScript(workspace.id, slug);
-  const directory = resolveInside(workspace.path, path.join('scripts', slug));
-  const metadata = await readMetadata(directory, { name: script.name, description: script.description, interface: { controls: script.controls, results: script.results } });
+  const app = await getApp(workspace.id, slug);
+  const directory = resolveInside(workspace.path, path.join('apps', slug));
+  const metadata = await readMetadata(directory, { name: app.name, description: app.description, interface: { controls: app.controls, results: app.results } });
   metadata.name = String(name ?? metadata.name).trim();
   metadata.description = String(description ?? metadata.description).trim();
   if (!metadata.name) throw new Error('Name cannot be empty.');
   if (!metadata.description) throw new Error('Description cannot be empty.');
   await writeMetadata(directory, metadata);
-  return getScript(workspace.id, slug);
+  return getApp(workspace.id, slug);
 }
 
-export async function deleteScript(workspaceId, slug) {
+export async function deleteApp(workspaceId, slug) {
   const workspace = await getWorkspace(workspaceId);
-  const script = await getScript(workspace.id, slug);
-  await fs.rm(resolveInside(workspace.path, path.join('scripts', slug)), { recursive: true });
-  await removeFromSavedOrder(workspace.id, 'scripts', slug);
-  return { deleted: { slug: script.slug, name: script.name } };
+  const app = await getApp(workspace.id, slug);
+  await fs.rm(resolveInside(workspace.path, path.join('apps', slug)), { recursive: true });
+  await removeFromSavedOrder(workspace.id, 'apps', slug);
+  return { deleted: { slug: app.slug, name: app.name } };
 }
 
-export async function runScript(workspaceId, slug, input = {}) {
+export async function runApp(workspaceId, slug, input = {}) {
   const workspace = await getWorkspace(workspaceId);
-  const script = await getScript(workspace.id, slug);
-  const scriptDir = resolveInside(workspace.path, path.join('scripts', slug));
+  const app = await getApp(workspace.id, slug);
+  const appDir = resolveInside(workspace.path, path.join('apps', slug));
   const startedAt = new Date();
   try {
     const values = {};
-    for (const control of script.controls) {
+    for (const control of app.controls) {
       let value = input?.[control.name] ?? control.default ?? '';
       if (control.type === 'number' && value !== '') {
         value = Number(value);
@@ -689,12 +604,12 @@ export async function runScript(workspaceId, slug, input = {}) {
       values[control.name] = value;
     }
     const result = await new Promise((resolve, reject) => {
-      const worker = new Worker(workerPath, { workerData: { workspacePath: workspace.path, actionDir: scriptDir, input: values }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 } });
-      const timer = setTimeout(() => { worker.terminate(); reject(new Error('Script exceeded the 30 second time limit.')); }, 30_000);
+      const worker = new Worker(workerPath, { workerData: { workspacePath: workspace.path, appDir: appDir, input: values }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 } });
+      const timer = setTimeout(() => { worker.terminate(); reject(new Error('App exceeded the 30 second time limit.')); }, 30_000);
       worker.once('message', (message) => {
         clearTimeout(timer);
         if (message.ok) return resolve(message);
-        const error = new Error(message.error || 'Script failed.');
+        const error = new Error(message.error || 'App failed.');
         error.runLogs = message.logs;
         error.runStack = message.stack;
         reject(error);
@@ -702,7 +617,7 @@ export async function runScript(workspaceId, slug, input = {}) {
       worker.once('error', (error) => { clearTimeout(timer); reject(error); });
     });
     const finishedAt = new Date();
-    await appendScriptRun(scriptDir, {
+    await appendAppRun(appDir, {
       id: uniqueId(),
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
@@ -713,7 +628,7 @@ export async function runScript(workspaceId, slug, input = {}) {
     return result;
   } catch (error) {
     const finishedAt = new Date();
-    await appendScriptRun(scriptDir, {
+    await appendAppRun(appDir, {
       id: uniqueId(),
       startedAt: startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
@@ -727,11 +642,11 @@ export async function runScript(workspaceId, slug, input = {}) {
   }
 }
 
-export async function getScriptRunHistory(workspaceId, slug) {
+export async function getAppRunHistory(workspaceId, slug) {
   const workspace = await getWorkspace(workspaceId);
-  await getScript(workspace.id, slug);
-  const scriptDir = resolveInside(workspace.path, path.join('scripts', slug));
-  const history = (await fs.readFile(runHistoryPath(scriptDir), 'utf8').catch(() => ''))
+  await getApp(workspace.id, slug);
+  const appDir = resolveInside(workspace.path, path.join('apps', slug));
+  const history = (await fs.readFile(runHistoryPath(appDir), 'utf8').catch(() => ''))
     .split('\n')
     .filter(Boolean)
     .map((line) => { try { return JSON.parse(line); } catch { return null; } })
@@ -739,14 +654,14 @@ export async function getScriptRunHistory(workspaceId, slug) {
   return history.slice(-runHistoryLimit).reverse();
 }
 
-export async function getScriptResults(workspaceId, slug) {
+export async function getAppResults(workspaceId, slug) {
   const workspace = await getWorkspace(workspaceId);
-  const script = await getScript(workspace.id, slug);
-  const scriptRoot = resolveInside(workspace.path, path.join('scripts', slug));
-  return Promise.all(script.results.map(async (result) => {
+  const app = await getApp(workspace.id, slug);
+  const appRoot = resolveInside(workspace.path, path.join('apps', slug));
+  return Promise.all(app.results.map(async (result) => {
     const relative = String(result.path || '').replace(/^[/\\]+/, '');
-    if (!relative.startsWith('outputs/')) throw new Error('Script result paths must be beneath outputs/.');
-    const target = resolveInside(scriptRoot, relative);
+    if (!relative.startsWith('outputs/')) throw new Error('App result paths must be beneath outputs/.');
+    const target = resolveInside(appRoot, relative);
     const content = await fs.readFile(target, 'utf8').catch(() => null);
     if (content === null) return { ...result, missing: true };
     if (result.type === 'table') {
@@ -757,35 +672,35 @@ export async function getScriptResults(workspaceId, slug) {
   }));
 }
 
-export async function writeScriptInput(workspaceId, slug, name, data) {
+export async function writeAppInput(workspaceId, slug, name, data) {
   const workspace = await getWorkspace(workspaceId);
-  await getScript(workspace.id, slug);
+  await getApp(workspace.id, slug);
   const safeName = path.basename(String(name || ''));
   if (!safeName || safeName !== name) throw new Error('Input filename must not contain folders.');
-  const target = resolveInside(workspace.path, path.join('scripts', slug, 'inputs', safeName));
+  const target = resolveInside(workspace.path, path.join('apps', slug, 'inputs', safeName));
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, data);
-  return { path: path.join('scripts', slug, 'inputs', safeName) };
+  return { path: path.join('apps', slug, 'inputs', safeName) };
 }
 
-export async function readScriptInput(workspaceId, slug, name) {
+export async function readAppInput(workspaceId, slug, name) {
   const workspace = await getWorkspace(workspaceId);
-  const script = await getScript(workspace.id, slug);
+  const app = await getApp(workspace.id, slug);
   const safeName = String(name || '').replace(/^[/\\]+/, '');
-  if (!script.inputs.includes(safeName)) throw new Error('Script input not found.');
-  return { data: await fs.readFile(resolveInside(workspace.path, path.join('scripts', slug, 'inputs', safeName))), path: path.join('scripts', slug, 'inputs', safeName) };
+  if (!app.inputs.includes(safeName)) throw new Error('App input not found.');
+  return { data: await fs.readFile(resolveInside(workspace.path, path.join('apps', slug, 'inputs', safeName))), path: path.join('apps', slug, 'inputs', safeName) };
 }
 
-export async function writeScriptOutput(workspaceId, slug, name, data) {
+export async function writeAppOutput(workspaceId, slug, name, data) {
   const workspace = await getWorkspace(workspaceId);
-  await getScript(workspace.id, slug);
+  await getApp(workspace.id, slug);
   const safeName = String(name || '').replace(/^[/\\]+/, '');
-  if (!safeName || safeName.split(/[\\/]/).includes('..')) throw new Error('Output path must stay inside the Script outputs folder.');
-  const outputRoot = resolveInside(workspace.path, path.join('scripts', slug, 'outputs'));
+  if (!safeName || safeName.split(/[\\/]/).includes('..')) throw new Error('Output path must stay inside the App outputs folder.');
+  const outputRoot = resolveInside(workspace.path, path.join('apps', slug, 'outputs'));
   const target = resolveInside(outputRoot, safeName);
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, data);
-  return { path: path.join('scripts', slug, 'outputs', safeName) };
+  return { path: path.join('apps', slug, 'outputs', safeName) };
 }
 
 export async function listPrompts(workspaceId) {
@@ -808,9 +723,9 @@ export async function listPrompts(workspaceId) {
 }
 
 export async function reorderItems(workspaceId, kind, slugs) {
-  if (!['scripts', 'prompts', 'tables'].includes(kind)) throw new Error('Only Scripts, Prompts, and Tables can be reordered.');
+  if (!['apps', 'prompts', 'tables'].includes(kind)) throw new Error('Only Apps, Prompts, and Tables can be reordered.');
   const workspace = await getWorkspace(workspaceId);
-  const items = kind === 'scripts' ? await listScripts(workspace.id)
+  const items = kind === 'apps' ? await listApps(workspace.id)
     : kind === 'prompts' ? await listPrompts(workspace.id)
       : (await listDataTables(workspace.id)).filter((item) => item.source_kind === 'table');
   const requested = Array.isArray(slugs) ? slugs.map(String) : [];
@@ -822,7 +737,7 @@ export async function reorderItems(workspaceId, kind, slugs) {
   state.orders ||= {};
   state.orders[workspace.id] = { ...(state.orders[workspace.id] || {}), [kind]: requested };
   await saveState(state);
-  return kind === 'scripts' ? listScripts(workspace.id) : kind === 'prompts' ? listPrompts(workspace.id) : listDataTables(workspace.id);
+  return kind === 'apps' ? listApps(workspace.id) : kind === 'prompts' ? listPrompts(workspace.id) : listDataTables(workspace.id);
 }
 
 export async function getPrompt(workspaceId, slug) {
@@ -888,89 +803,6 @@ export async function deletePrompt(workspaceId, slug) {
   return { deleted: { slug: prompt.slug, name: prompt.name } };
 }
 
-export async function createAction({ workspaceId, slug, readme, runJs, prompt, indexHtml, overwrite = false }) {
-  const workspace = await getWorkspace(workspaceId);
-  const safeSlug = actionSlug(slug);
-  if (!String(readme || '').trim().startsWith('# ')) throw new Error('README.md must begin with a level-one title.');
-  if (!/export\s+default/.test(String(runJs || ''))) throw new Error('run.js must export one default function.');
-  const directory = resolveInside(workspace.path, path.join('actions', safeSlug));
-  const exists = await fs.access(directory).then(() => true).catch(() => false);
-  if (exists && !overwrite) throw new Error('That Action already exists. Set overwrite only when the user explicitly asked to replace it.');
-  await fs.mkdir(path.join(directory, 'inputs'), { recursive: true });
-  await fs.mkdir(path.join(directory, 'outputs'), { recursive: true });
-  await fs.writeFile(path.join(directory, 'README.md'), String(readme));
-  await fs.writeFile(path.join(directory, 'run.js'), String(runJs));
-  if (prompt !== undefined) {
-    if (!String(prompt).trim()) throw new Error('PROMPT.md cannot be empty.');
-    await fs.writeFile(path.join(directory, 'PROMPT.md'), String(prompt));
-  } else if (overwrite) {
-    await fs.rm(path.join(directory, 'PROMPT.md'), { force: true });
-  }
-  if (indexHtml !== undefined) await fs.writeFile(path.join(directory, 'index.html'), String(indexHtml));
-  return getAction(workspace.id, safeSlug);
-}
-
-export async function renameAction(workspaceId, slug, newSlug) {
-  const workspace = await getWorkspace(workspaceId);
-  await getAction(workspace.id, slug);
-  const safeNewSlug = actionSlug(newSlug);
-  const source = resolveInside(workspace.path, path.join('actions', slug));
-  const target = resolveInside(workspace.path, path.join('actions', safeNewSlug));
-  if (await fs.access(target).then(() => true).catch(() => false)) throw new Error('An Action with that name already exists.');
-  await fs.rename(source, target);
-  return getAction(workspace.id, safeNewSlug);
-}
-
-export async function duplicateAction(workspaceId, slug, newSlug) {
-  const workspace = await getWorkspace(workspaceId);
-  await getAction(workspace.id, slug);
-  const safeNewSlug = actionSlug(newSlug);
-  const source = resolveInside(workspace.path, path.join('actions', slug));
-  const target = resolveInside(workspace.path, path.join('actions', safeNewSlug));
-  if (await fs.access(target).then(() => true).catch(() => false)) throw new Error('An Action with that name already exists.');
-  await fs.cp(source, target, { recursive: true });
-  return getAction(workspace.id, safeNewSlug);
-}
-
-export async function deleteAction(workspaceId, slug) {
-  const workspace = await getWorkspace(workspaceId);
-  const action = await getAction(workspace.id, slug);
-  await fs.rm(resolveInside(workspace.path, path.join('actions', slug)), { recursive: true });
-  return { deleted: { slug: action.slug, name: action.name } };
-}
-
-export async function writeActionInput(workspaceId, slug, name, data) {
-  const workspace = await getWorkspace(workspaceId);
-  await getAction(workspace.id, slug);
-  const safeName = path.basename(String(name || ''));
-  if (!safeName || safeName !== name) throw new Error('Input filename must not contain folders.');
-  const target = resolveInside(workspace.path, path.join('actions', slug, 'inputs', safeName));
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, data);
-  return { path: path.join('actions', slug, 'inputs', safeName) };
-}
-
-export async function writeActionOutput(workspaceId, slug, name, data) {
-  const workspace = await getWorkspace(workspaceId);
-  await getAction(workspace.id, slug);
-  const safeName = String(name || '').replace(/^[/\\]+/, '');
-  if (!safeName || safeName.split(path.sep).includes('..')) throw new Error('Output path must stay inside the Action outputs folder.');
-  const outputRoot = resolveInside(workspace.path, path.join('actions', slug, 'outputs'));
-  const target = resolveInside(outputRoot, safeName);
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, data);
-  return { path: path.join('actions', slug, 'outputs', safeName) };
-}
-
-export async function readActionInput(workspaceId, slug, name) {
-  const workspace = await getWorkspace(workspaceId);
-  const action = await getAction(workspace.id, slug);
-  const safeName = String(name || '').replace(/^[/\\]+/, '');
-  if (!action.inputs.includes(safeName)) throw new Error('Action input not found.');
-  const data = await fs.readFile(resolveInside(workspace.path, path.join('actions', slug, 'inputs', safeName)));
-  return { data, path: path.join('actions', slug, 'inputs', safeName) };
-}
-
 export async function setupInbox(workspaceId, relativePath, { repair = false } = {}) {
   const workspace = await getWorkspace(workspaceId);
   const directory = resolveInside(workspace.path, relativePath);
@@ -1000,7 +832,7 @@ export async function setupInbox(workspaceId, relativePath, { repair = false } =
   }
   catch (error) {
     await Promise.all(created.reverse().map((target) => fs.rm(target, { recursive: true, force: true })));
-    throw error?.code === 'EEXIST' ? new Error('runlet.json was created by another action. Refresh and try again.') : error;
+    throw error?.code === 'EEXIST' ? new Error('runlet.json was created by another process. Refresh and try again.') : error;
   }
   return describeInboxFolder(workspace, relativePath);
 }
@@ -1075,7 +907,7 @@ export async function listInboxes(workspaceId, { includeDisabled = false } = {})
     const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'node_modules' || skipNames.has(entry.name)) continue;
-      if (relativePath === '.' && (entry.name === 'scripts' || entry.name === 'prompts')) continue;
+      if (relativePath === '.' && (entry.name === 'apps' || entry.name === 'prompts')) continue;
       const childPath = relativePath === '.' ? entry.name : path.join(relativePath, entry.name);
       const childDirectory = path.join(directory, entry.name);
       const manifest = await readInboxManifest(childDirectory);

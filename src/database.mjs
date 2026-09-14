@@ -469,7 +469,7 @@ export async function deleteInboxTables(workspacePath, inboxPath) {
   }
 }
 
-export function createScriptDataApi(workspacePath) {
+export function createAppDataApi(workspacePath) {
   return Object.freeze({
     listTables: () => listDataTables(workspacePath),
     read: async (tableName, options = {}) => {

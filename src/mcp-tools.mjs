@@ -41,20 +41,20 @@ export const mcpToolGroups = [
     ],
   },
   {
-    name: 'Scripts',
+    name: 'Apps',
     tools: [
-      ['list_scripts', 'List runnable Scripts in a workspace, including inputs, outputs, and view availability.'],
-      ['get_script', 'Read one Script’s metadata and instructions.'],
-      ['get_script_template', 'Get the authoritative Script structure and rules. Always call before create_script.'],
-      ['create_script', 'Create a validated local Script mini-app with generated controls and result panels. Creates inputs/ and outputs/ automatically.'],
-      ['run_script', 'Run a local Script and return its logs. Inspect its outputs before reporting completion.'],
-      ['get_script_run_history', 'Read the 50 most recent completed and failed runs for a Script, including its run.log messages and final errors.'],
-      ['get_script_results', 'Read the Script outputs declared as summary, text, or table result panels.'],
-      ['update_script_metadata', 'Change a Script’s display name or description without renaming its folder.'],
-      ['delete_script', 'Permanently delete a Script and its inputs and outputs. Use only when the user explicitly asks.'],
-      ['read_script_input', 'Read a binary or text Script input as an embedded resource.'],
-      ['write_script_input', 'Add or replace a Script input using UTF-8 text or base64 binary data.'],
-      ['write_script_output', 'Write UTF-8 text or base64 binary data beneath a Script outputs/ directory.'],
+      ['list_apps', 'List Apps in a workspace, including controls, results, inputs, outputs, and custom-page availability.'],
+      ['get_app', 'Read one App’s metadata and instructions.'],
+      ['get_app_template', 'Get the authoritative portable App structure and rules. Always call before create_app.'],
+      ['create_app', 'Create a validated local App with a generated interface or a richer browser page. Creates inputs/ and outputs/ automatically.'],
+      ['run_app', 'Run an App and return its logs. Inspect its declared results and output files before reporting completion.'],
+      ['get_app_run_history', 'Read the 50 most recent successful and failed runs for an App, including timestamps, durations, logs, final errors, and technical details.'],
+      ['get_app_results', 'Read the App outputs declared as summary, text, or table result panels.'],
+      ['update_app_metadata', 'Change an App’s display name or description without renaming its folder.'],
+      ['delete_app', 'Permanently delete an App and its inputs, outputs, and run history. Use only when the user explicitly asks.'],
+      ['read_app_input', 'Read a binary or text App input as an embedded resource.'],
+      ['write_app_input', 'Add or replace an App input using UTF-8 text or base64 binary data.'],
+      ['write_app_output', 'Write UTF-8 text or base64 binary data beneath an App outputs/ directory.'],
     ],
   },
   {
@@ -80,5 +80,5 @@ export function formatMcpTools() {
   const sections = mcpToolGroups.map((group) => `${group.name}\n${group.tools
     .map(([name, description]) => `  ${name.padEnd(width)}  ${description}`)
     .join('\n')}`);
-  return `Runlet tools provided to connected AI apps\n\n${sections.join('\n\n')}\n\nThese tools can access only explicitly registered Runlet workspaces.\nRun \u201crunlet libraries\u201d to see the APIs available inside Script JavaScript.`;
+  return `Runlet tools provided to connected AI apps\n\n${sections.join('\n\n')}\n\nThese tools can access only explicitly registered Runlet workspaces.\nRun \u201crunlet libraries\u201d to see the APIs available inside App JavaScript.`;
 }

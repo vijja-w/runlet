@@ -28,11 +28,11 @@ function sendFile(response, target) {
 app.get('/api/state', route(async () => {
   const state = await workshop.listWorkspaces();
   const selected = state.workspaces.find((item) => item.id === state.selectedId) || null;
-  const scripts = selected ? await workshop.listScripts(selected.id) : [];
+  const apps = selected ? await workshop.listApps(selected.id) : [];
   const prompts = selected ? await workshop.listPrompts(selected.id) : [];
   const files = selected ? await workshop.listFiles(selected.id) : [];
   const dataTables = selected ? await workshop.listDataTables(selected.id) : [];
-  return { ...state, selected, scripts, prompts, files, dataTables, defaultFolder: path.join(os.homedir(), 'Runlet Workspaces') };
+  return { ...state, selected, apps, prompts, files, dataTables, defaultFolder: path.join(os.homedir(), 'Runlet Workspaces') };
 }));
 app.get('/api/health', (_request, response) => response.json({ ok: true, name: 'runlet', pid: process.pid, instanceToken }));
 app.get('/api/connections', route(async () => connections.listConnections()));
@@ -70,31 +70,31 @@ app.delete('/api/data/tables/:table/columns/:column', route(async ({ params, bod
 app.post('/api/data/tables/:table/rows', route(async ({ params, body }) => workshop.addDataRow(body.workspaceId, params.table, body.values || {})));
 app.patch('/api/data/tables/:table/rows/:rowId', route(async ({ params, body }) => workshop.updateDataCell(body.workspaceId, params.table, params.rowId, body.column, body.value)));
 app.delete('/api/data/tables/:table/rows/:rowId', route(async ({ params, body }) => workshop.deleteDataRow(body.workspaceId, params.table, params.rowId)));
-app.post('/api/scripts/:slug/run', route(async ({ params, body }) => workshop.runScript(body.workspaceId, params.slug, body.input || {})));
-app.get('/api/scripts/:slug/runs', route(async ({ params, query }) => workshop.getScriptRunHistory(query.workspaceId, params.slug)));
-app.get('/api/scripts/:slug/results', route(async ({ params, query }) => workshop.getScriptResults(query.workspaceId, params.slug)));
-app.patch('/api/scripts/:slug', route(async ({ params, body }) => workshop.updateScriptMetadata(body.workspaceId, params.slug, body)));
-app.delete('/api/scripts/:slug', route(async ({ params, body }) => workshop.deleteScript(body.workspaceId, params.slug)));
+app.post('/api/apps/:slug/run', route(async ({ params, body }) => workshop.runApp(body.workspaceId, params.slug, body.input || {})));
+app.get('/api/apps/:slug/runs', route(async ({ params, query }) => workshop.getAppRunHistory(query.workspaceId, params.slug)));
+app.get('/api/apps/:slug/results', route(async ({ params, query }) => workshop.getAppResults(query.workspaceId, params.slug)));
+app.patch('/api/apps/:slug', route(async ({ params, body }) => workshop.updateAppMetadata(body.workspaceId, params.slug, body)));
+app.delete('/api/apps/:slug', route(async ({ params, body }) => workshop.deleteApp(body.workspaceId, params.slug)));
 app.put('/api/order/:kind', route(async ({ params, body }) => workshop.reorderItems(body.workspaceId, params.kind, body.slugs)));
-app.post('/api/scripts/:slug/inputs', route(async ({ params, body }) => workshop.writeScriptInput(body.workspaceId, params.slug, body.name, Buffer.from(body.data, 'base64'))));
+app.post('/api/apps/:slug/inputs', route(async ({ params, body }) => workshop.writeAppInput(body.workspaceId, params.slug, body.name, Buffer.from(body.data, 'base64'))));
 app.put('/api/prompts/:slug', route(async ({ params, body }) => workshop.updatePrompt(body.workspaceId, params.slug, body.content)));
 app.patch('/api/prompts/:slug', route(async ({ params, body }) => workshop.updatePromptMetadata(body.workspaceId, params.slug, body)));
 app.delete('/api/prompts/:slug', route(async ({ params, body }) => workshop.deletePrompt(body.workspaceId, params.slug)));
 
-app.get('/script-view/:workspaceId/:slug/*rest', route(async (request, response) => {
+app.get('/app-view/:workspaceId/:slug/*rest', route(async (request, response) => {
   const workspace = await workshop.getWorkspace(request.params.workspaceId);
-  await workshop.getScript(workspace.id, request.params.slug);
+  await workshop.getApp(workspace.id, request.params.slug);
   const relative = Array.isArray(request.params.rest) ? request.params.rest.join('/') : request.params.rest || 'index.html';
-  const scriptRoot = workshop.resolveInside(workspace.path, path.join('scripts', request.params.slug));
-  const target = workshop.resolveInside(scriptRoot, relative);
+  const appRoot = workshop.resolveInside(workspace.path, path.join('apps', request.params.slug));
+  const target = workshop.resolveInside(appRoot, relative);
   await sendFile(response, target);
 }));
-app.get('/script-view/:workspaceId/:slug', (request, response) => response.redirect(`/script-view/${request.params.workspaceId}/${request.params.slug}/index.html`));
-app.get('/script-output/:workspaceId/:slug/*rest', route(async (request, response) => {
+app.get('/app-view/:workspaceId/:slug', (request, response) => response.redirect(`/app-view/${request.params.workspaceId}/${request.params.slug}/index.html`));
+app.get('/app-output/:workspaceId/:slug/*rest', route(async (request, response) => {
   const workspace = await workshop.getWorkspace(request.params.workspaceId);
-  await workshop.getScript(workspace.id, request.params.slug);
+  await workshop.getApp(workspace.id, request.params.slug);
   const relative = Array.isArray(request.params.rest) ? request.params.rest.join('/') : request.params.rest;
-  const outputRoot = workshop.resolveInside(workspace.path, path.join('scripts', request.params.slug, 'outputs'));
+  const outputRoot = workshop.resolveInside(workspace.path, path.join('apps', request.params.slug, 'outputs'));
   await sendFile(response, workshop.resolveInside(outputRoot, relative));
 }));
 

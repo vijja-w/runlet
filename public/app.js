@@ -1,13 +1,13 @@
 const app = document.querySelector('#app');
 const initialLocation = new URLSearchParams(window.location.search);
-let state = { workspaces: [], scripts: [], prompts: [], files: [], dataTables: [], selected: null, connections: [] };
-let view = ['scripts', 'prompts', 'data', 'tables', 'files', 'connections'].includes(initialLocation.get('view')) ? initialLocation.get('view') : 'scripts';
-let selectedScript = null;
+let state = { workspaces: [], apps: [], prompts: [], files: [], dataTables: [], selected: null, connections: [] };
+let view = ['apps', 'prompts', 'data', 'tables', 'files', 'connections'].includes(initialLocation.get('view')) ? initialLocation.get('view') : 'apps';
+let selectedApp = null;
 let selectedPrompt = null;
-let scriptResults = [];
-let scriptInputValues = {};
-let scriptRunHistory = [];
-let scriptHistoryOpen = false;
+let appResults = [];
+let appInputValues = {};
+let appRunHistory = [];
+let appHistoryOpen = false;
 let selectedDataTable = null;
 let dataTable = null;
 let dataSearch = '';
@@ -16,7 +16,7 @@ let dataSortDirection = 'ascending';
 let filePath = initialLocation.get('path') || '.';
 let selectedWorkspaceId = null;
 let connectionsLoading = false;
-let scriptSearch = '';
+let appSearch = '';
 let promptSearch = '';
 let inboxDataSearch = '';
 let tablesSearch = '';
@@ -74,17 +74,17 @@ async function refresh() {
   if (state.selected && filePath !== '.') {
     state.files = await api(`/api/files?workspaceId=${encodeURIComponent(state.selected.id)}&path=${encodeURIComponent(filePath)}`);
   }
-  if (selectedScript) selectedScript = state.scripts.find((script) => script.slug === selectedScript.slug) || null;
+  if (selectedApp) selectedApp = state.apps.find((app) => app.slug === selectedApp.slug) || null;
   if (selectedPrompt) selectedPrompt = state.prompts.find((prompt) => prompt.slug === selectedPrompt.slug) || null;
   render();
 }
 
 function render() {
   if (!state.selected) return renderWelcome();
-  const collectionView = !selectedScript && !selectedPrompt && (view === 'scripts' || view === 'prompts' || view === 'connections' || ((view === 'data' || view === 'tables') && !selectedDataTable));
-  const content = selectedScript ? scriptDetail(selectedScript)
+  const collectionView = !selectedApp && !selectedPrompt && (view === 'apps' || view === 'prompts' || view === 'connections' || ((view === 'data' || view === 'tables') && !selectedDataTable));
+  const content = selectedApp ? appDetail(selectedApp)
     : selectedPrompt ? promptDetail(selectedPrompt)
-      : view === 'data' ? dataView() : view === 'tables' ? tablesView() : view === 'files' ? filesView() : view === 'prompts' ? promptsView() : view === 'connections' ? connectionsView() : scriptsView();
+      : view === 'data' ? dataView() : view === 'tables' ? tablesView() : view === 'files' ? filesView() : view === 'prompts' ? promptsView() : view === 'connections' ? connectionsView() : appsView();
   app.innerHTML = `<main class="shell">
     <aside class="sidebar">
       <div class="brand"><span>R</span><b>Runlet</b></div>
@@ -94,11 +94,11 @@ function render() {
       <nav>
         <div class="nav-group">${sidebarNavItem('files', 'Files', state.files.length, 'Drop files onto a folder to copy them there. The original files stay where they are.')}</div>
         <div class="nav-group">${sidebarNavItem('data', 'Inbox Data', state.dataTables.filter((table) => table.source_kind !== 'table').length, selectedDataTable && view === 'data' && dataTable ? dataHelpText(dataTable) : 'Tables of information collected by your Inboxes.')}${sidebarNavItem('tables', 'Tables', state.dataTables.filter((table) => table.source_kind === 'table').length, selectedDataTable && view === 'tables' && dataTable ? dataHelpText(dataTable) : 'Spreadsheet-like data you create yourself. Your AI can also use Runlet to read and edit it.')}</div>
-        <div class="nav-group">${sidebarNavItem('scripts', 'Scripts', state.scripts.length, 'Small programs that run locally.')}${sidebarNavItem('prompts', 'Prompts', state.prompts.length, 'Saved instructions for your AI.')}</div>
+        <div class="nav-group">${sidebarNavItem('apps', 'Apps', state.apps.length, 'Small programs that run locally.')}${sidebarNavItem('prompts', 'Prompts', state.prompts.length, 'Saved instructions for your AI.')}</div>
         <div class="nav-group">${sidebarNavItem('connections', 'Connections', null, 'Connect Runlet to supported AI apps installed on this computer.')}</div>
       </nav>
     </aside>
-    <section class="main ${collectionView ? 'collection-main' : ''} ${view === 'files' && !selectedScript && !selectedPrompt ? 'files-main' : ''} ${(view === 'data' || view === 'tables') && !selectedScript && !selectedPrompt ? 'data-main' : ''}">${content}</section>
+    <section class="main ${collectionView ? 'collection-main' : ''} ${view === 'files' && !selectedApp && !selectedPrompt ? 'files-main' : ''} ${(view === 'data' || view === 'tables') && !selectedApp && !selectedPrompt ? 'data-main' : ''}">${content}</section>
   </main><div id="modal-root"></div><div id="toast-root"></div>`;
   bindEvents();
 }
@@ -116,7 +116,7 @@ function workspaceBreadcrumb(value) {
 function renderWelcome() {
   app.innerHTML = `<main class="welcome"><section>
     <h1>Runlet</h1>
-    <p>Choose a folder. Keep its files, Scripts, and Prompts together.</p>
+    <p>Choose a folder. Keep its files, Apps, and Prompts together.</p>
     <div class="welcome-actions">
       <button class="primary" id="add-workspace">Add workspace</button>
     </div>
@@ -126,7 +126,7 @@ function renderWelcome() {
 }
 
 function topbar(title, subtitle = '', controls = '', editableKind = '') {
-  const backLabel = selectedScript ? 'Scripts' : selectedPrompt ? 'Prompts' : '';
+  const backLabel = selectedApp ? 'Apps' : selectedPrompt ? 'Prompts' : '';
   const editable = editableKind
     ? `class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="${editableKind}"`
     : '';
@@ -137,21 +137,21 @@ function topbar(title, subtitle = '', controls = '', editableKind = '') {
   </div><div class="top-controls">${controls}</div></header>`;
 }
 
-function scriptsView() {
-  const cards = state.scripts.length
-    ? state.scripts.map((script) => `<article class="action-card" data-script="${escapeHtml(script.slug)}" data-order-item="${escapeHtml(script.slug)}" data-search-text="${escapeHtml(`${script.name} ${script.description}`.toLowerCase())}">
+function appsView() {
+  const cards = state.apps.length
+    ? state.apps.map((app) => `<article class="action-card" data-app="${escapeHtml(app.slug)}" data-order-item="${escapeHtml(app.slug)}" data-search-text="${escapeHtml(`${app.name} ${app.description}`.toLowerCase())}">
         <div class="action-copy">
-          <h2>${escapeHtml(script.name)}</h2>
-          <p>${escapeHtml(script.description)}</p>
+          <h2>${escapeHtml(app.name)}</h2>
+          <p>${escapeHtml(app.description)}</p>
         </div>
         <div class="card-actions">
-          <button class="primary small open-script" data-open-script="${escapeHtml(script.slug)}">Open</button>
-          ${dragHandle('script', script.slug)}
+          <button class="primary small open-app" data-open-app="${escapeHtml(app.slug)}">Open</button>
+          ${dragHandle('app', app.slug)}
         </div>
       </article>`).join('')
-    : `<div class="empty"><h2>No Scripts yet</h2><p>Try asking: “Ask Runlet to create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
-  const search = state.scripts.length ? listSearch('script', scriptSearch) : '';
-  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="script" data-order-list="scripts">${cards}${noSearchResults('script', 'Scripts')}</div></div>`;
+    : `<div class="empty"><h2>No Apps yet</h2><p>Try asking: “Ask Runlet to create an App in ${escapeHtml(state.selected.name)}.”</p></div>`;
+  const search = state.apps.length ? listSearch('app', appSearch) : '';
+  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="app" data-order-list="apps">${cards}${noSearchResults('app', 'Apps')}</div></div>`;
 }
 
 function promptsView() {
@@ -269,7 +269,7 @@ function formatDataValue(column, value) {
 }
 
 function listSearch(kind, value, customLabel = '') {
-  const label = customLabel || (kind === 'script' ? 'Scripts' : 'Prompts');
+  const label = customLabel || (kind === 'app' ? 'Apps' : 'Prompts');
   return `<label class="list-search compact-search" for="${kind}-search">${icons.search}<span class="visually-hidden">Search ${label}</span><input id="${kind}-search" type="search" value="${escapeHtml(value)}" placeholder="Search ${label}" autocomplete="off"></label>`;
 }
 
@@ -281,24 +281,24 @@ function noSearchResults(kind, label) {
   return `<div class="empty compact search-empty" data-search-empty="${kind}" hidden><p>No matching ${label}.</p></div>`;
 }
 
-function scriptDetail(script) {
-  const controlFields = script.controls.length
-    ? script.controls.map((control) => renderScriptControl(control)).join('')
-    : '<p class="muted">This Script is ready to run.</p>';
-  const resultPanels = scriptResults.filter((result) => !result.missing).map(renderResult).join('');
-  const topControls = `<button class="secondary" id="script-run-history" type="button">Run history</button>${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Previous run</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
-  return `<div class="script-app"><div class="detail-toolbar"><div class="detail-identity"><h1 class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="script" data-meta-field="name">${escapeHtml(script.name)}</h1><p class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="script" data-meta-field="description">${escapeHtml(script.description)}</p></div><div class="top-controls">${topControls}</div></div>
-    <form id="script-run-form" class="control-panel">
+function appDetail(app) {
+  const controlFields = app.controls.length
+    ? app.controls.map((control) => renderAppControl(control)).join('')
+    : '<p class="muted">This App is ready to run.</p>';
+  const resultPanels = appResults.filter((result) => !result.missing).map(renderResult).join('');
+  const topControls = `<button class="secondary" id="app-run-history" type="button">Run history</button>${app.hasPage ? `<a class="secondary" target="_blank" rel="noopener" href="/app-view/${state.selected.id}/${encodeURIComponent(app.slug)}">Open App</a>` : ''}${iconButton('remove', 'Delete App', `data-delete-kind="app" data-delete-slug="${escapeHtml(app.slug)}"`)}`;
+  return `<div class="app-page"><div class="detail-toolbar"><div class="detail-identity"><h1 class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="app" data-meta-field="name">${escapeHtml(app.name)}</h1><p class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="app" data-meta-field="description">${escapeHtml(app.description)}</p></div><div class="top-controls">${topControls}</div></div>
+    <form id="app-run-form" class="control-panel">
       <div class="control-grid">${controlFields}</div>
-      <div class="run-footer"><span>Runs locally in this workspace.</span><button class="primary run-script" type="submit" data-run-script="${escapeHtml(script.slug)}">Run</button></div>
+      <div class="run-footer"><span>Runs locally in this workspace.</span><button class="primary run-app" type="submit" data-run-app="${escapeHtml(app.slug)}">Run</button></div>
     </form>
-    ${scriptHistoryOpen ? renderRunHistory() : ''}
-    ${script.results.length ? `<section class="results-section"><h2>Results</h2><div class="results-grid">${resultPanels || '<div class="empty compact"><p>Run the Script to see results.</p></div>'}</div></section>` : ''}
+    ${appHistoryOpen ? renderRunHistory() : ''}
+    ${app.results.length ? `<section class="results-section"><h2>Results</h2><div class="results-grid">${resultPanels || '<div class="empty compact"><p>Run the App to see results.</p></div>'}</div></section>` : ''}
   </div>`;
 }
 
 function renderRunHistory() {
-  const records = scriptRunHistory.length ? scriptRunHistory.map((run) => {
+  const records = appRunHistory.length ? appRunHistory.map((run) => {
     const failed = run.status === 'failed';
     const timestamp = new Date(run.finishedAt || run.startedAt);
     const when = Number.isNaN(timestamp.valueOf()) ? '' : timestamp.toLocaleString();
@@ -316,8 +316,8 @@ function renderRunHistory() {
   return `<section class="run-history-section"><div class="run-history-heading"><h2>Run history</h2><button class="secondary small" id="close-run-history" type="button">Close</button></div><div class="run-history-list">${records}</div></section>`;
 }
 
-function renderScriptControl(control) {
-  const value = scriptInputValues[control.name] ?? control.default ?? control.options?.[0] ?? '';
+function renderAppControl(control) {
+  const value = appInputValues[control.name] ?? control.default ?? control.options?.[0] ?? '';
   const required = control.required ? 'required' : '';
   if (control.type === 'select') {
     const options = (control.options || []).map((option) => `<option value="${escapeHtml(option)}" ${String(value) === String(option) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('');
@@ -470,29 +470,29 @@ function formatSize(size) {
 function bindEvents() {
   document.querySelectorAll('[data-view]').forEach((button) => button.onclick = () => {
     view = button.dataset.view;
-    selectedScript = null;
+    selectedApp = null;
     selectedPrompt = null;
     selectedDataTable = null;
     dataTable = null;
     render();
     if (view === 'connections') loadConnections();
   });
-  document.querySelectorAll('[data-script]').forEach((card) => card.onclick = (event) => {
+  document.querySelectorAll('[data-app]').forEach((card) => card.onclick = (event) => {
     if (event.target.closest('button,a')) return;
-    selectedScript = state.scripts.find((script) => script.slug === card.dataset.script);
-    scriptResults = [];
-    scriptInputValues = {};
-    scriptRunHistory = [];
-    scriptHistoryOpen = false;
+    selectedApp = state.apps.find((app) => app.slug === card.dataset.app);
+    appResults = [];
+    appInputValues = {};
+    appRunHistory = [];
+    appHistoryOpen = false;
     render();
   });
-  document.querySelectorAll('[data-open-script]').forEach((button) => button.onclick = (event) => {
+  document.querySelectorAll('[data-open-app]').forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
-    selectedScript = state.scripts.find((script) => script.slug === button.dataset.openScript);
-    scriptResults = [];
-    scriptInputValues = {};
-    scriptRunHistory = [];
-    scriptHistoryOpen = false;
+    selectedApp = state.apps.find((app) => app.slug === button.dataset.openApp);
+    appResults = [];
+    appInputValues = {};
+    appRunHistory = [];
+    appHistoryOpen = false;
     render();
   });
   document.querySelectorAll('[data-prompt]').forEach((card) => card.onclick = (event) => {
@@ -501,7 +501,7 @@ function bindEvents() {
     render();
   });
   document.querySelectorAll('[data-copy-prompt]').forEach((button) => button.onclick = (event) => { event.stopPropagation(); copyPrompt(button.dataset.copyPrompt); });
-  bindListControls('script');
+  bindListControls('app');
   bindListControls('prompt');
   bindListControls('table');
   bindSimpleListSearch('inbox-data', inboxDataSearch, (value) => { inboxDataSearch = value; });
@@ -510,7 +510,7 @@ function bindEvents() {
   document.querySelectorAll('[data-delete-kind]').forEach((button) => button.onclick = () => confirmDeleteItem(button.dataset.deleteKind, button.dataset.deleteSlug));
   document.querySelectorAll('[data-file-path]').forEach((button) => button.onclick = () => openFolder(button.dataset.filePath));
   bindFileBrowser();
-  document.querySelector('#back')?.addEventListener('click', () => { selectedScript = null; selectedPrompt = null; selectedDataTable = null; dataTable = null; scriptResults = []; scriptInputValues = {}; scriptRunHistory = []; scriptHistoryOpen = false; render(); });
+  document.querySelector('#back')?.addEventListener('click', () => { selectedApp = null; selectedPrompt = null; selectedDataTable = null; dataTable = null; appResults = []; appInputValues = {}; appRunHistory = []; appHistoryOpen = false; render(); });
   document.querySelector('#refresh')?.addEventListener('click', refresh);
   document.querySelector('#workspace-switch')?.addEventListener('click', workspaceSwitcher);
   const workspacePath = document.querySelector('.workspace-breadcrumb');
@@ -519,9 +519,9 @@ function bindEvents() {
   document.querySelector('#refresh-connections')?.addEventListener('click', loadConnections);
   document.querySelectorAll('[data-connection]').forEach((button) => button.onclick = () => changeConnection(button));
   document.querySelector('#prompt-form')?.addEventListener('submit', savePrompt);
-  document.querySelector('#script-run-form')?.addEventListener('submit', runScript);
-  document.querySelector('#script-run-history')?.addEventListener('click', toggleScriptRunHistory);
-  document.querySelector('#close-run-history')?.addEventListener('click', () => { scriptHistoryOpen = false; render(); });
+  document.querySelector('#app-run-form')?.addEventListener('submit', runApp);
+  document.querySelector('#app-run-history')?.addEventListener('click', toggleAppRunHistory);
+  document.querySelector('#close-run-history')?.addEventListener('click', () => { appHistoryOpen = false; render(); });
   bindDataBrowser();
   document.querySelectorAll('[data-meta-field]').forEach((element) => {
     element.addEventListener('keydown', (event) => {
@@ -782,7 +782,7 @@ function bindListControls(kind) {
   const input = document.querySelector(`#${kind}-search`);
   if (input) {
     input.addEventListener('input', () => {
-      if (kind === 'script') scriptSearch = input.value;
+      if (kind === 'app') appSearch = input.value;
       else promptSearch = input.value;
       applyListFilter(kind, input.value);
     });
@@ -790,7 +790,7 @@ function bindListControls(kind) {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       input.value = '';
-      if (kind === 'script') scriptSearch = '';
+      if (kind === 'app') appSearch = '';
       else promptSearch = '';
       applyListFilter(kind, '');
     });
@@ -982,7 +982,7 @@ async function openFolder(path, targetView = view) {
       fileHistoryIndex = fileHistory.length - 1;
     }
     view = targetView;
-    selectedScript = null;
+    selectedApp = null;
     selectedPrompt = null;
     selectedDataTable = null;
     dataTable = null;
@@ -1042,7 +1042,7 @@ function bindFileBrowser() {
   document.querySelectorAll('[data-open-inbox-data]').forEach((button) => button.addEventListener('click', (event) => {
     event.stopPropagation();
     view = 'data';
-    selectedScript = null;
+    selectedApp = null;
     selectedPrompt = null;
     selectedDataTable = button.dataset.openInboxData;
     dataTable = null;
@@ -1364,63 +1364,63 @@ async function openFile(path) {
   } catch (error) { toast(error.message, true); }
 }
 
-async function loadScriptResults() {
-  if (!selectedScript || !selectedScript.results.length) return;
-  const slug = selectedScript.slug;
+async function loadAppResults() {
+  if (!selectedApp || !selectedApp.results.length) return;
+  const slug = selectedApp.slug;
   try {
-    scriptResults = await api(`/api/scripts/${encodeURIComponent(slug)}/results?workspaceId=${encodeURIComponent(state.selected.id)}`);
-    if (selectedScript?.slug === slug) render();
+    appResults = await api(`/api/apps/${encodeURIComponent(slug)}/results?workspaceId=${encodeURIComponent(state.selected.id)}`);
+    if (selectedApp?.slug === slug) render();
   } catch (error) { toast(error.message, true); }
 }
 
-async function loadScriptRunHistory() {
-  if (!selectedScript) return;
-  const slug = selectedScript.slug;
-  scriptRunHistory = await api(`/api/scripts/${encodeURIComponent(slug)}/runs?workspaceId=${encodeURIComponent(state.selected.id)}`);
+async function loadAppRunHistory() {
+  if (!selectedApp) return;
+  const slug = selectedApp.slug;
+  appRunHistory = await api(`/api/apps/${encodeURIComponent(slug)}/runs?workspaceId=${encodeURIComponent(state.selected.id)}`);
 }
 
-async function toggleScriptRunHistory() {
-  scriptHistoryOpen = !scriptHistoryOpen;
-  if (scriptHistoryOpen) {
-    try { await loadScriptRunHistory(); }
+async function toggleAppRunHistory() {
+  appHistoryOpen = !appHistoryOpen;
+  if (appHistoryOpen) {
+    try { await loadAppRunHistory(); }
     catch (error) { toast(error.message, true); }
   }
   render();
 }
 
-async function runScript(event) {
+async function runApp(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const button = form.querySelector('[data-run-script]');
-  const slug = button.dataset.runScript;
-  const hasView = selectedScript?.slug === slug && selectedScript.hasView;
-  const viewWindow = hasView ? window.open('about:blank', '_blank') : null;
+  const button = form.querySelector('[data-run-app]');
+  const slug = button.dataset.runApp;
+  const hasPage = selectedApp?.slug === slug && selectedApp.hasPage;
+  const viewWindow = hasPage ? window.open('about:blank', '_blank') : null;
   if (viewWindow) {
     viewWindow.opener = null;
-    viewWindow.document.title = `${selectedScript.name} — Running`;
-    viewWindow.document.body.innerHTML = '<p style="font: 15px system-ui; padding: 24px; color: #555">Running Script…</p>';
+    viewWindow.document.title = `${selectedApp.name} — Running`;
+    viewWindow.document.body.innerHTML = '<p style="font: 15px system-ui; padding: 24px; color: #555">Running App…</p>';
   }
-  scriptInputValues = Object.fromEntries(new FormData(form));
+  appInputValues = Object.fromEntries(new FormData(form));
   const old = button.textContent;
   button.disabled = true;
   button.textContent = 'Running…';
   try {
-    const response = await api(`/api/scripts/${encodeURIComponent(slug)}/run`, { method:'POST', body: JSON.stringify({ workspaceId: state.selected.id, input: scriptInputValues }) });
+    const response = await api(`/api/apps/${encodeURIComponent(slug)}/run`, { method:'POST', body: JSON.stringify({ workspaceId: state.selected.id, input: appInputValues }) });
     await refresh();
-    if (scriptHistoryOpen) { await loadScriptRunHistory(); render(); }
-    if (hasView) {
-      if (viewWindow) viewWindow.location.replace(`/script-view/${state.selected.id}/${encodeURIComponent(slug)}`);
-      toast(viewWindow ? (response.logs?.at(-1) || 'Script finished. Its page opened in a new tab.') : 'Script finished. Use Previous run to view it.');
+    if (appHistoryOpen) { await loadAppRunHistory(); render(); }
+    if (hasPage) {
+      if (viewWindow) viewWindow.location.replace(`/app-view/${state.selected.id}/${encodeURIComponent(slug)}`);
+      toast(viewWindow ? (response.logs?.at(-1) || 'App finished. Its page opened in a new tab.') : 'App finished. Use Open App to view it.');
     } else {
-      await loadScriptResults();
-      toast(response.logs?.at(-1) || 'Script finished.');
+      await loadAppResults();
+      toast(response.logs?.at(-1) || 'App finished.');
     }
   } catch (error) {
     if (viewWindow) viewWindow.close();
     button.disabled = false;
     button.textContent = old;
-    scriptHistoryOpen = true;
-    try { await loadScriptRunHistory(); } catch {}
+    appHistoryOpen = true;
+    try { await loadAppRunHistory(); } catch {}
     render();
     toast('Something went wrong. Check Run history.', true);
   }
@@ -1430,7 +1430,7 @@ async function saveMetadata(event) {
   const element = event.currentTarget;
   const kind = element.dataset.metaKind;
   const field = element.dataset.metaField;
-  const item = kind === 'script' ? selectedScript : selectedPrompt;
+  const item = kind === 'app' ? selectedApp : selectedPrompt;
   const value = element.textContent.trim();
   if (!item || value === item[field]) return;
   try {
@@ -1438,7 +1438,7 @@ async function saveMetadata(event) {
       method: 'PATCH',
       body: JSON.stringify({ workspaceId: state.selected.id, [field]: value }),
     });
-    if (kind === 'script') selectedScript = updated;
+    if (kind === 'app') selectedApp = updated;
     else selectedPrompt = updated;
     await refresh();
     toast(`${field === 'name' ? 'Name' : 'Description'} saved.`);
@@ -1500,10 +1500,10 @@ async function deleteDataTable(button) {
 }
 
 function confirmDeleteItem(kind, slug) {
-  const item = kind === 'script' ? selectedScript : selectedPrompt;
+  const item = kind === 'app' ? selectedApp : selectedPrompt;
   if (!item || item.slug !== slug) return;
-  const label = kind === 'script' ? 'Script' : 'Prompt';
-  const detail = kind === 'script'
+  const label = kind === 'app' ? 'App' : 'Prompt';
+  const detail = kind === 'app'
     ? 'Its inputs, outputs, and generated files will also be permanently deleted.'
     : 'Its saved instructions will be permanently deleted.';
   modal(`<div class="modal-head"><h2>Delete ${label}?</h2><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
@@ -1517,17 +1517,17 @@ function confirmDeleteItem(kind, slug) {
 }
 
 async function deleteItem(kind, slug, button) {
-  const item = kind === 'script' ? selectedScript : selectedPrompt;
+  const item = kind === 'app' ? selectedApp : selectedPrompt;
   if (!item || item.slug !== slug) return;
   button.disabled = true;
   button.textContent = 'Deleting…';
   try {
     await api(`/api/${kind}s/${encodeURIComponent(slug)}`, { method: 'DELETE', body: JSON.stringify({ workspaceId: state.selected.id }) });
-    if (kind === 'script') {
-      selectedScript = null;
-      scriptResults = [];
-      scriptInputValues = {};
-      view = 'scripts';
+    if (kind === 'app') {
+      selectedApp = null;
+      appResults = [];
+      appInputValues = {};
+      view = 'apps';
     } else {
       selectedPrompt = null;
       view = 'prompts';
@@ -1537,7 +1537,7 @@ async function deleteItem(kind, slug, button) {
     toast(`${item.name} was deleted.`);
   } catch (error) {
     button.disabled = false;
-    button.textContent = `Delete ${kind === 'script' ? 'Script' : 'Prompt'}`;
+    button.textContent = `Delete ${kind === 'app' ? 'App' : 'Prompt'}`;
     toast(error.message, true);
   }
 }

@@ -85,12 +85,13 @@ async function status() {
 }
 
 function libraries() {
-  console.log(`Runlet Script APIs
+  console.log(`Runlet App APIs
 
 Values provided to run.js:
   workspace  Read, write, list, create, delete, and fetch workspace data
   run        Add messages to the run log
-  input      Values from the Script's controls
+  input      Values from the App's controls
+  data       Read and update Inbox Data and standalone Tables
   pdf        Extract text from text-based PDFs
   csv        Parse and create CSV data
   zip        Extract and create ZIP archives
@@ -101,6 +102,7 @@ Bundled helpers:
   workspace.read / readBytes / write / writeBytes
   workspace.list / exists / mkdir / delete / fetch
   run.log
+  data.listTables / read / insert / upsert
   pdf.extractText
   csv.parse / stringify
   zip.extract / create
@@ -108,10 +110,15 @@ Bundled helpers:
   docx.extractText
 
 Safe JavaScript globals:
-  console.log, setTimeout, clearTimeout, TextEncoder, TextDecoder, URL
+  console.log / info / warn / error
+  setTimeout, clearTimeout, TextEncoder, TextDecoder, URL
 
-Scripts cannot import packages or use Node.js filesystem, process, shell, or child-process APIs.
-Full reference: ${path.join(appRoot, 'SCRIPTING.md')}`);
+Run history:
+  Successful and failed runs include timestamps, duration, messages, and final errors.
+  Runlet keeps the newest 50 entries per App and bounds their size.
+
+Apps cannot import packages or use Node.js filesystem, process, shell, or child-process APIs.
+Full reference: ${path.join(appRoot, 'APPS.md')}`);
 }
 
 function tools() {
@@ -151,7 +158,7 @@ async function uninstall() {
 
   if (process.platform === 'win32') {
     const cleanupPath = path.join(os.tmpdir(), `runlet-uninstall-${process.pid}.ps1`);
-    const script = [
+    const cleanupCommands = [
       '$ErrorActionPreference = "SilentlyContinue"',
       'Start-Sleep -Milliseconds 800',
       `Remove-Item -LiteralPath '${installRoot.replaceAll("'", "''")}' -Recurse -Force`,
@@ -161,7 +168,7 @@ async function uninstall() {
       '[Environment]::SetEnvironmentVariable("Path", ($parts -join ";"), "User")',
       'Remove-Item -LiteralPath $PSCommandPath -Force',
     ].join('\r\n');
-    await fs.writeFile(cleanupPath, script);
+    await fs.writeFile(cleanupPath, cleanupCommands);
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', cleanupPath], {
       detached: true,
       stdio: 'ignore',
@@ -281,11 +288,11 @@ try {
   else if (command === 'kill' || command === 'stop') await kill();
   else if (command === 'uninstall') await uninstall();
   else if (command === 'update') await update();
-  else if (command === 'libraries' || command === 'script-api') libraries();
+  else if (command === 'libraries' || command === 'app-api') libraries();
   else if (command === 'tools') tools();
   else if (command === 'version' || command === '--version' || command === '-v') await version();
   else if (command === 'help' || command === '--help' || command === '-h') {
-    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet version   Show the installed version\n  runlet update    Check for and install the latest release\n  runlet tools     Show the tools provided to connected AI apps\n  runlet libraries Show the JavaScript APIs available to Scripts\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
+    console.log('Runlet\n\n  runlet           Start Runlet or open it if already running\n  runlet status    Check whether Runlet is running\n  runlet version   Show the installed version\n  runlet update    Check for and install the latest release\n  runlet tools     Show the tools provided to connected AI apps\n  runlet libraries Show the JavaScript APIs available to Apps\n  runlet kill      Stop Runlet\n  runlet open      Start or open Runlet\n  runlet uninstall Remove the installed app (workspace folders are kept)');
   } else {
     console.error(`Unknown command: ${command}\nRun “runlet help” for available commands.`);
     process.exitCode = 1;
