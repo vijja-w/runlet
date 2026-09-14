@@ -231,7 +231,7 @@ function dataView() {
   }
   const cards = tables.length
     ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}" data-order-item="${escapeHtml(table.table_name)}" data-search-text="${escapeHtml(`${table.inbox_path} ${table.display_name}`.toLowerCase())}">
-        <div class="action-copy data-table-copy">${dataListBreadcrumb(table)}<small>Collected from this Inbox</small></div>
+        <div class="action-copy data-table-copy">${dataListBreadcrumb(table)}${cardDescription('inbox-data', table.table_name, 'Collected from this Inbox')}</div>
         <div class="card-actions">${reorderHandle('inbox', table.table_name, table.display_name)}</div>
       </article>`).join('')
     : `<div class="empty"><h2>No Inbox Data yet</h2><p>Turn a folder into an Inbox to give it a table.</p></div>`;
@@ -388,7 +388,7 @@ function filesView() {
   return `<header class="files-topbar">
     <div class="files-location"><nav class="breadcrumbs" aria-label="Current folder">${fileBreadcrumbs()}</nav></div>
     <div class="files-actions">
-      <label class="file-search compact-search" for="file-search">${icons.search}<span class="visually-hidden">Search this folder</span><input id="file-search" type="search" value="${escapeHtml(fileSearch)}" placeholder="Search" autocomplete="off"></label>
+      <label class="file-search compact-search" for="file-search">${icons.search}<span class="visually-hidden">Search in this folder</span><input id="file-search" type="search" value="${escapeHtml(fileSearch)}" placeholder="Search in this folder" autocomplete="off"></label>
       <details class="sort-menu"><summary class="icon-button" aria-label="Sort files" data-tooltip="Sort files">${icons.sort}</summary><div class="sort-popover" role="menu"><p>Sort by</p>${Object.entries(sortLabels).map(([value, label]) => `<button role="menuitemradio" aria-label="${label}" aria-checked="${fileSort === value}" data-file-sort="${value}"><span>${fileSort === value ? '✓' : ''}</span>${label}</button>`).join('')}</div></details>
       ${iconButton('newFolder', 'New Folder', 'id="new-folder"')}
       ${iconButton('refresh', 'Refresh', 'id="refresh"')}
@@ -399,7 +399,7 @@ function filesView() {
       <div class="finder-header" role="row">
         ${fileHeaderButton('name', 'Name')}${fileHeaderButton('modified', 'Date Modified')}${fileHeaderButton('size', 'Size')}${inboxHeader()}
       </div>
-      <div class="finder-body">${rows || `<div class="file-empty"><p>This folder is empty.</p>${iconButton('newFolder', 'New Folder', 'data-empty-new-folder')}</div>`}<div class="file-empty search-file-empty" hidden><p>No files match your search.</p></div></div>
+      <div class="finder-body">${rows || '<div class="file-empty"><p>Folder is empty.</p></div>'}<div class="file-empty search-file-empty" hidden><p>No files match your search.</p></div></div>
     </div>
   </div>`;
 }
