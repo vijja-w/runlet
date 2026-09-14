@@ -62,7 +62,7 @@ prompts/
     └── PROMPT.md
 ```
 
-The Files area lets someone intentionally inspect workspace files and enable ordinary folders as Inboxes. Files can be dragged from the computer or from another Runlet folder onto a folder to copy them there; the original stays where it is. App and Prompt pages keep paths and implementation details out of the normal workflow.
+The Files area lets someone intentionally inspect workspace files and enable ordinary folders as Inboxes. Files can be dragged from the computer or from another Runlet folder onto a folder to copy them there; the original stays where it is. The selected file sort and ascending or descending direction are remembered between visits. App controls and Prompt pages keep paths and implementation details out of the normal workflow.
 
 ## Inboxes
 
@@ -79,7 +79,7 @@ needs-review/
 
 The **Inbox Data** area first shows a searchable list of Inboxes. Open one to see its spreadsheet. You can edit cells, sort or search rows, add and remove rows or columns, rename or move columns, and paste a block copied from Excel or CSV. Column types remain an internal detail for now. Runlet stores the tables together in a private SQLite database under `.runlet/`; that implementation detail stays out of the normal interface.
 
-The separate **Tables** area uses the same spreadsheet interface for information someone creates themselves rather than information extracted by an Inbox. New Tables begin with one editable column. Table cards can be reordered, and rows and columns can be added from the table view or through a connected AI using Runlet. A column can be renamed, moved, or deleted from its three-dot menu. A standalone Table can be permanently deleted from its table view after confirmation; an Inbox table can only be removed with its Inbox folder.
+The separate **Tables** area uses the same spreadsheet interface for information someone creates themselves rather than information extracted by an Inbox. New Tables begin with one editable column. Table cards show an editable name and description and can be reordered. Rows and columns can be added from the table view or through a connected AI using Runlet. A column can be renamed, moved, or deleted from its three-dot menu. A standalone Table can be permanently deleted after confirmation; an Inbox table can only be removed with its Inbox folder.
 
 When an older Inbox is opened for the first time, Runlet imports its `data.csv` into the table and moves the original file into a hidden backup folder. Deleting an Inbox folder also deletes its table. Removing the workspace from Runlet never deletes the workspace folder or its database.
 
@@ -88,6 +88,8 @@ Turning an Inbox off preserves all of its files but removes it from normal AI pr
 ## Tools provided to AI apps
 
 Runlet connects to compatible AI apps through MCP. It provides tools for registered workspaces, files and Inboxes, Inbox Data and standalone Tables, Apps, and Prompts. The AI can only access folders that have been explicitly registered as Runlet workspaces.
+
+The MCP surface deliberately stays small. Runlet-specific tools discover Apps, Prompts, Inboxes, and Tables or perform operations that ordinary files cannot, such as running an App or editing SQLite-backed data. The shared `read_file` and `write_file` tools handle normal creation and editing for Apps, Prompts, Inbox instructions, inputs, outputs, and browser assets. Both UTF-8 text and base64 binary files are supported.
 
 For Inboxes, the AI uses `list_inboxes` to discover enabled work, `get_inbox` to read one Inbox and its exact table name, and the Data tools to inspect or modify cells, rows, and columns. The same Data tools work with standalone Tables. They deliberately provide structured operations instead of exposing the SQLite file directly. The ordinary file tools move completed source files. This is what makes requests such as “Use Runlet to modify the invoices table” work without asking the user to manage the database directly.
 
@@ -101,11 +103,11 @@ This list is generated from the same descriptions used by Runlet's MCP server, s
 
 ## Apps
 
-An App is a portable local program. `runlet.json` defines its editable name, description, controls, and result panels. Every App opens on its own Runlet page, and Runlet generates the normal controls-and-results interface from that information.
+An App is a portable local program. `runlet.json` defines its editable name, description, controls, and declared output results.
 
-Controls may be text fields, numbers, or dropdowns. A dropdown can load unique options from a workspace table column. Results may show an `outputs/` text file as a summary or an `outputs/` CSV file as a table.
+The Apps list provides the main **Run** button. Apps without inputs run immediately. Apps with controls first open their compact input form; controls may be text fields, numbers, or dropdowns, and a dropdown can load unique options from a workspace table column.
 
-An App may include `index.html` for a richer browser interface. **Open App** opens that page without requiring another run. Its HTML, CSS, JavaScript, and other assets should stay in the App folder and use relative URLs so the whole workspace works on another computer with Runlet installed. CDNs should be avoided unless genuinely necessary, and Apps should not depend on per-machine package installs or a separate server.
+Running an App opens a new result page. An App may include `index.html` for a richer browser interface, which Runlet opens after the run finishes. Processing-only Apps without a custom page show a simple completion or failure page instead. HTML, CSS, JavaScript, and other assets should stay in the App folder and use relative URLs so the whole workspace works on another computer with Runlet installed. CDNs should be avoided unless genuinely necessary, and Apps should not depend on per-machine package installs or a separate server.
 
 App JavaScript runs locally in an isolated worker and receives only Runlet's built-in APIs, including workspace table access and helpers for PDF, CSV, ZIP, Excel `.xlsx`, and Word `.docx` files. See [App JavaScript API and bundled libraries](APPS.md), or run:
 
@@ -135,9 +137,9 @@ Turn invoice PDFs into one CSV file.
 - `outputs/invoices.csv` — extracted invoice details.
 ```
 
-Open an App and use its trash button to permanently delete the App together with its inputs, outputs, and run history.
+Click an App's drag handle to open its Edit and Delete actions, or drag the same handle to reorder it. Edit replaces that card's text with matching name and description fields until it is saved or cancelled. Prompts and standalone Tables use the same pattern. Inbox Data has a reorder-only handle. While searching, every handle remains visible but reordering is disabled. Long descriptions stay collapsed until their disclosure button is clicked.
 
-Every successful and failed run is recorded in **Run history**. Each entry includes its timestamp, duration, `run.log()` and `console.log/info/warn/error()` messages, final error, and technical details when available. Runlet retains the newest 50 entries per App and bounds the size of individual entries so logs cannot grow forever.
+Every successful and failed run is still recorded for connected AI tools and diagnostics, but run history is not shown in the normal App interface. Each entry includes its timestamp, duration, `run.log()` and `console.log/info/warn/error()` messages, final error, and technical details when available. Runlet retains the newest 50 entries per App and bounds the size of individual entries so logs cannot grow forever.
 
 ## Prompts
 
@@ -162,7 +164,7 @@ Return one `invoices.csv` file with those exact column names.
 
 Ask a connected AI: `Ask Runlet to use the “Extract Invoice” Prompt with the attached PDFs.`
 
-Open a Prompt and use its trash button to permanently delete it.
+Click a Prompt to edit its instructions in a modal without leaving the Prompt list. The same modal editing pattern is used for Inbox instructions in Files. Either editor can be dismissed with its close button, the Escape key, or a click outside it. Prompt names, descriptions, and deletion remain on the Prompt list.
 
 ## AI connections
 

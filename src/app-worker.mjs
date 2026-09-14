@@ -207,6 +207,8 @@ try {
   const stack = error && typeof error.stack === 'string' ? error.stack : '';
   parentPort.postMessage({
     ok: false,
+    kind: 'app',
+    status: 'failed',
     error: message,
     stack,
     logs,

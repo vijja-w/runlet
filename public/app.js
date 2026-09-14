@@ -4,10 +4,7 @@ let state = { workspaces: [], apps: [], prompts: [], files: [], dataTables: [], 
 let view = ['apps', 'prompts', 'data', 'tables', 'files', 'connections'].includes(initialLocation.get('view')) ? initialLocation.get('view') : 'apps';
 let selectedApp = null;
 let selectedPrompt = null;
-let appResults = [];
 let appInputValues = {};
-let appRunHistory = [];
-let appHistoryOpen = false;
 let selectedDataTable = null;
 let dataTable = null;
 let dataSearch = '';
@@ -22,20 +19,33 @@ let inboxDataSearch = '';
 let tablesSearch = '';
 let connectionSearch = '';
 let fileSearch = '';
-let fileSort = 'none';
-let fileSortDirection = 'ascending';
+const savedFileSort = (() => {
+  try { return JSON.parse(localStorage.getItem('runlet-file-sort') || '{}'); }
+  catch { return {}; }
+})();
+let fileSort = ['none', 'name', 'inbox', 'kind', 'modified', 'size'].includes(savedFileSort.sort) ? savedFileSort.sort : 'none';
+let fileSortDirection = ['ascending', 'descending'].includes(savedFileSort.direction) ? savedFileSort.direction : 'ascending';
 let selectedFilePath = null;
 let fileHistory = [filePath];
 let fileHistoryIndex = 0;
 let modalEscapeHandler = null;
 let tooltipTimer = null;
 let tooltipTarget = null;
+let tooltipSuppressedTarget = null;
+let editingCard = null;
+const expandedDescriptions = new Set();
 
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const icons = {
   add: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>',
   refresh: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 7A6 6 0 1 0 16 11"/><path d="M15.5 3v4h-4"/></svg>',
   remove: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 6.5h11M8 3.5h4l1 3H7l1-3ZM6.5 6.5l.6 10h5.8l.6-10M8.5 9v5M11.5 9v5"/></svg>',
+  edit: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4 13.5-.8 3.3 3.3-.8L15 7.5 12.5 5zM11.5 6l2.5 2.5"/></svg>',
+  copy: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="6.5" y="6.5" width="10" height="10" rx="1.5"/><path d="M13.5 6.5v-2a1 1 0 0 0-1-1h-9v9a1 1 0 0 0 1 1h2"/></svg>',
+  expand: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg>',
+  play: '<svg viewBox="0 0 20 20" aria-hidden="true"><path class="play-mark" d="M7 4.8v10.4L15 10z"/></svg>',
+  check: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></svg>',
+  close: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>',
   grip: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="5" r="1"/><circle cx="13" cy="5" r="1"/><circle cx="7" cy="10" r="1"/><circle cx="13" cy="10" r="1"/><circle cx="7" cy="15" r="1"/><circle cx="13" cy="15" r="1"/></svg>',
   search: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m12.5 12.5 4 4"/></svg>',
   back: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5-5.5 5.5 5.5 5.5"/></svg>',
@@ -48,8 +58,34 @@ const icons = {
   info: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6h.01"/></svg>',
 };
 const iconButton = (icon, label, attributes = '') => `<button class="icon-button" aria-label="${escapeHtml(label)}" data-tooltip="${escapeHtml(label)}" ${attributes}>${icons[icon]}</button>`;
+const cardActionButton = (icon, label, attributes = '') => `<button class="card-action-button" aria-label="${escapeHtml(label)}" data-tooltip="${escapeHtml(label)}" ${attributes}>${icons[icon]}</button>`;
+const menuIconButton = (icon, label, attributes = '', danger = false) => `<button class="menu-icon ${danger ? 'menu-danger' : ''}" aria-label="${escapeHtml(label)}" data-tooltip="${escapeHtml(label)}" ${attributes}>${icons[icon]}</button>`;
 const inlineInfo = (label, text, attributes = '') => `<button class="inline-info" aria-label="${escapeHtml(label)}" data-tooltip="${escapeHtml(label)}" data-info-text="${escapeHtml(text)}" ${attributes}>i</button>`;
-const dragHandle = (kind, slug) => `<button type="button" class="drag-handle" data-drag-kind="${kind}" data-drag-slug="${escapeHtml(slug)}" aria-label="Reorder ${kind}" data-tooltip="Drag to reorder">${icons.grip}</button>`;
+const listItemMenu = (kind, slug, label, content) => `<details class="list-item-menu"><summary class="drag-handle" data-drag-kind="${kind}" data-drag-slug="${escapeHtml(slug)}" aria-label="Options and reorder ${escapeHtml(label)}" data-tooltip="Drag to reorder · Click for options">${icons.grip}</summary><div>${content}</div></details>`;
+const reorderHandle = (kind, slug, label) => `<button class="drag-handle reorder-only" data-drag-kind="${kind}" data-drag-slug="${escapeHtml(slug)}" aria-label="Reorder ${escapeHtml(label)}" data-tooltip="Drag to reorder">${icons.grip}</button>`;
+const descriptionKey = (kind, id) => `${kind}:${id}`;
+function cardDescription(kind, id, description) {
+  const key = descriptionKey(kind, id);
+  const expanded = expandedDescriptions.has(key);
+  return `<div class="card-description ${expanded ? 'expanded' : ''}" data-description-key="${escapeHtml(key)}"><p>${escapeHtml(description)}</p></div>`;
+}
+const descriptionToggle = (kind, id) => {
+  const key = descriptionKey(kind, id);
+  const expanded = expandedDescriptions.has(key);
+  return `<button class="card-action-button description-toggle ${expanded ? 'expanded' : ''}" data-description-toggle="${escapeHtml(key)}" aria-label="${expanded ? 'Collapse description' : 'Show full description'}" data-tooltip="${expanded ? 'Collapse description' : 'Show full description'}" ${expanded ? '' : 'hidden'}>${icons.expand}</button>`;
+};
+const editableTitle = (_kind, _id, value) => `<h2>${escapeHtml(value)}</h2>`;
+const cardEditKey = (kind, id) => `${kind}:${id}`;
+const cardIsEditing = (kind, id) => editingCard === cardEditKey(kind, id);
+function cardEditor(kind, id, name, description) {
+  const formId = `card-edit-${kind}-${id}`;
+  return `<form class="card-inline-editor" id="${escapeHtml(formId)}" data-card-edit-form data-edit-kind="${kind}" data-edit-id="${escapeHtml(id)}"><input name="name" aria-label="Name" value="${escapeHtml(name)}" required><textarea name="description" aria-label="Description" rows="2" required>${escapeHtml(description)}</textarea></form>`;
+}
+const cardEditActions = (kind, id) => {
+  const formId = `card-edit-${kind}-${id}`;
+  return `${cardActionButton('close', 'Cancel edit', 'type="button" data-cancel-card-edit')}${cardActionButton('check', 'Save changes', `type="submit" form="${escapeHtml(formId)}"`)}`;
+};
+const listMenuActions = (kind, slug) => `${menuIconButton('edit', 'Edit', `data-start-card-edit="${kind}" data-edit-id="${escapeHtml(slug)}"`)}${menuIconButton('remove', 'Delete', kind === 'table' ? `data-delete-table-name="${escapeHtml(slug)}"` : `data-delete-kind="${kind}" data-delete-slug="${escapeHtml(slug)}"`, true)}`;
 const api = async (url, options = {}) => {
   const response = await fetch(url, { headers: { 'content-type': 'application/json', ...options.headers }, ...options });
   const data = await response.json();
@@ -139,33 +175,50 @@ function topbar(title, subtitle = '', controls = '', editableKind = '') {
 
 function appsView() {
   const cards = state.apps.length
-    ? state.apps.map((app) => `<article class="action-card" data-app="${escapeHtml(app.slug)}" data-order-item="${escapeHtml(app.slug)}" data-search-text="${escapeHtml(`${app.name} ${app.description}`.toLowerCase())}">
+    ? state.apps.map((app) => {
+      const editing = cardIsEditing('app', app.slug);
+      return `<article class="action-card app-list-card ${editing ? 'editing' : ''}" data-order-item="${escapeHtml(app.slug)}" data-search-text="${escapeHtml(`${app.name} ${app.description}`.toLowerCase())}">
         <div class="action-copy">
-          <h2>${escapeHtml(app.name)}</h2>
-          <p>${escapeHtml(app.description)}</p>
+          ${editing ? cardEditor('app', app.slug, app.name, app.description) : `${editableTitle('app', app.slug, app.name)}${cardDescription('app', app.slug, app.description)}`}
         </div>
         <div class="card-actions">
-          <button class="primary small open-app" data-open-app="${escapeHtml(app.slug)}">Open</button>
-          ${dragHandle('app', app.slug)}
+          ${editing ? cardEditActions('app', app.slug) : `${descriptionToggle('app', app.slug)}${app.controls.length
+            ? cardActionButton('play', 'Run', `data-open-app="${escapeHtml(app.slug)}"`)
+            : `<form class="list-run-form" data-app-run-form>${cardActionButton('play', 'Run', `type="submit" data-run-app="${escapeHtml(app.slug)}"`)}</form>`}${listItemMenu('app', app.slug, app.name, listMenuActions('app', app.slug))}`}
         </div>
-      </article>`).join('')
+      </article>`;
+    }).join('')
     : `<div class="empty"><h2>No Apps yet</h2><p>Try asking: “Ask Runlet to create an App in ${escapeHtml(state.selected.name)}.”</p></div>`;
   const search = state.apps.length ? listSearch('app', appSearch) : '';
-  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="app" data-order-list="apps">${cards}${noSearchResults('app', 'Apps')}</div></div>`;
+  return `<div class="page collection-page">${collectionToolbar(search, iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="action-list" data-filter-list="app" data-order-list="apps">${cards}${noSearchResults('app', 'Apps')}</div></div>`;
 }
 
 function promptsView() {
   const cards = state.prompts.length
-    ? state.prompts.map((prompt) => `<article class="action-card" data-prompt="${escapeHtml(prompt.slug)}" data-order-item="${escapeHtml(prompt.slug)}" data-search-text="${escapeHtml(`${prompt.name} ${prompt.description}`.toLowerCase())}">
-        <div class="action-copy"><h2>${escapeHtml(prompt.name)}</h2><p>${escapeHtml(prompt.description)}</p></div>
+    ? state.prompts.map((prompt) => {
+      const editing = cardIsEditing('prompt', prompt.slug);
+      return `<article class="action-card ${editing ? 'editing' : ''}" data-prompt="${escapeHtml(prompt.slug)}" data-order-item="${escapeHtml(prompt.slug)}" data-search-text="${escapeHtml(`${prompt.name} ${prompt.description}`.toLowerCase())}">
+        <div class="action-copy">${editing ? cardEditor('prompt', prompt.slug, prompt.name, prompt.description) : `${editableTitle('prompt', prompt.slug, prompt.name)}${cardDescription('prompt', prompt.slug, prompt.description)}`}</div>
         <div class="card-actions">
-          <button class="secondary small copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy</button>
-          ${dragHandle('prompt', prompt.slug)}
+          ${editing ? cardEditActions('prompt', prompt.slug) : `${descriptionToggle('prompt', prompt.slug)}${cardActionButton('copy', 'Copy', `data-copy-prompt="${escapeHtml(prompt.slug)}"`)}${listItemMenu('prompt', prompt.slug, prompt.name, listMenuActions('prompt', prompt.slug))}`}
         </div>
-      </article>`).join('')
+      </article>`;
+    }).join('')
     : `<div class="empty"><h2>No Prompts yet</h2><p>Try asking: “Ask Runlet to create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
   const search = state.prompts.length ? listSearch('prompt', promptSearch) : '';
-  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="prompt" data-order-list="prompts">${cards}${noSearchResults('prompt', 'Prompts')}</div></div>`;
+  return `<div class="page collection-page">${collectionToolbar(search, iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="action-list" data-filter-list="prompt" data-order-list="prompts">${cards}${noSearchResults('prompt', 'Prompts')}</div></div>`;
+}
+
+function promptEditorModal(slug) {
+  const prompt = state.prompts.find((item) => item.slug === slug);
+  if (!prompt) return;
+  modal(`<div class="modal-head instruction-editor-head"><div><h2>Edit Prompt</h2><p>${escapeHtml(prompt.name)}</p></div><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
+    <form id="prompt-editor-form" class="instruction-editor" data-prompt-slug="${escapeHtml(prompt.slug)}">
+      <textarea class="instruction-editor-content" name="content" aria-label="Prompt" spellcheck="true" required>${escapeHtml(prompt.content)}</textarea>
+      <div class="instruction-editor-actions"><span class="editor-file-name">PROMPT.md</span><button class="editor-save" type="submit" aria-label="Save" data-tooltip="Save">${icons.check}</button></div>
+    </form>`, { className: 'editor-modal', clickAway: true });
+  document.querySelector('#prompt-editor-form').onsubmit = savePrompt;
+  requestAnimationFrame(() => document.querySelector('#prompt-editor-form textarea')?.focus());
 }
 
 function dataView() {
@@ -177,13 +230,13 @@ function dataView() {
     return `<div class="data-detail">${active ? renderDataSheet(active) : '<div class="empty"><p>Loading table…</p></div>'}</div>`;
   }
   const cards = tables.length
-    ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}" data-search-text="${escapeHtml(`${table.inbox_path} ${table.display_name}`.toLowerCase())}">
-        <div class="action-copy data-table-copy">${dataListBreadcrumb(table)}<small>${table.rowCount} ${table.rowCount === 1 ? 'row' : 'rows'}</small></div>
-        <div class="card-actions"><button class="primary small" data-open-data-table="${escapeHtml(table.table_name)}">Open</button></div>
+    ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}" data-order-item="${escapeHtml(table.table_name)}" data-search-text="${escapeHtml(`${table.inbox_path} ${table.display_name}`.toLowerCase())}">
+        <div class="action-copy data-table-copy">${dataListBreadcrumb(table)}<small>Collected from this Inbox</small></div>
+        <div class="card-actions">${reorderHandle('inbox', table.table_name, table.display_name)}</div>
       </article>`).join('')
     : `<div class="empty"><h2>No Inbox Data yet</h2><p>Turn a folder into an Inbox to give it a table.</p></div>`;
   const search = tables.length ? listSearch('inbox-data', inboxDataSearch, 'Inbox Data') : '';
-  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="inbox-data">${cards}${noSearchResults('inbox-data', 'Inbox Data')}</div></div>`;
+  return `<div class="page collection-page">${collectionToolbar(search, iconButton('refresh', 'Refresh', 'id="refresh"'))}<div class="action-list" data-filter-list="inbox-data" data-order-list="inboxes">${cards}${noSearchResults('inbox-data', 'Inbox Data')}</div></div>`;
 }
 
 function tablesView() {
@@ -193,10 +246,15 @@ function tablesView() {
     return `<div class="data-detail">${active ? renderDataSheet(active) : '<div class="empty"><p>Loading table…</p></div>'}</div>`;
   }
   const cards = tables.length
-    ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}" data-order-item="${escapeHtml(table.table_name)}" data-search-text="${escapeHtml(table.display_name.toLowerCase())}"><div class="action-copy"><h2>${escapeHtml(table.display_name)}</h2><small>${table.rowCount} ${table.rowCount === 1 ? 'row' : 'rows'}</small></div><div class="card-actions"><button class="primary small" data-open-data-table="${escapeHtml(table.table_name)}">Open</button>${dragHandle('table', table.table_name)}</div></article>`).join('')
+    ? tables.map((table) => {
+      const description = table.description || 'A table for organizing information.';
+      const editing = cardIsEditing('table', table.table_name);
+      return `<article class="action-card ${editing ? 'editing' : ''}" data-data-table="${escapeHtml(table.table_name)}" data-order-item="${escapeHtml(table.table_name)}" data-search-text="${escapeHtml(`${table.display_name} ${description}`.toLowerCase())}"><div class="action-copy">${editing ? cardEditor('table', table.table_name, table.display_name, description) : `${editableTitle('table', table.table_name, table.display_name)}${cardDescription('table', table.table_name, description)}`}</div><div class="card-actions">${editing ? cardEditActions('table', table.table_name) : `${descriptionToggle('table', table.table_name)}${listItemMenu('table', table.table_name, table.display_name, listMenuActions('table', table.table_name))}`}</div></article>`;
+    }).join('')
     : `<div class="empty"><h2>No Tables yet</h2><p>Create a table for information you want to organize yourself.</p></div>`;
   const search = tables.length ? listSearch('table-list', tablesSearch, 'Tables') : '';
-  return `<div class="page collection-page">${collectionToolbar(search, iconButton('add', 'New Table', 'id="new-data-table"'))}<div class="action-list" data-filter-list="table-list" data-order-list="tables">${cards}${noSearchResults('table-list', 'Tables')}</div></div>`;
+  const controls = `${iconButton('add', 'New Table', 'id="new-data-table"')}${iconButton('refresh', 'Refresh', 'id="refresh"')}`;
+  return `<div class="page collection-page">${collectionToolbar(search, controls)}<div class="action-list" data-filter-list="table-list" data-order-list="tables">${cards}${noSearchResults('table-list', 'Tables')}</div></div>`;
 }
 
 function dataListBreadcrumb(table) {
@@ -282,38 +340,17 @@ function noSearchResults(kind, label) {
 }
 
 function appDetail(app) {
-  const controlFields = app.controls.length
-    ? app.controls.map((control) => renderAppControl(control)).join('')
-    : '<p class="muted">This App is ready to run.</p>';
-  const resultPanels = appResults.filter((result) => !result.missing).map(renderResult).join('');
-  const topControls = `<button class="secondary" id="app-run-history" type="button">Run history</button>${app.hasPage ? `<a class="secondary" target="_blank" rel="noopener" href="/app-view/${state.selected.id}/${encodeURIComponent(app.slug)}">Open App</a>` : ''}${iconButton('remove', 'Delete App', `data-delete-kind="app" data-delete-slug="${escapeHtml(app.slug)}"`)}`;
+  const hasControls = app.controls.length > 0;
+  const runButton = `<button class="primary run-app" type="submit" data-run-app="${escapeHtml(app.slug)}">Run</button>`;
+  const inlineRun = hasControls ? '' : `<form id="app-run-form" class="inline-run-form">${runButton}</form>`;
+  const topControls = `${inlineRun}${iconButton('remove', 'Delete App', `data-delete-kind="app" data-delete-slug="${escapeHtml(app.slug)}"`)}`;
+  const controlPanel = hasControls ? `<form id="app-run-form" class="control-panel">
+      <div class="control-grid">${app.controls.map((control) => renderAppControl(control)).join('')}</div>
+      <div class="run-footer"><span>Runs locally in this workspace.</span>${runButton}</div>
+    </form>` : '';
   return `<div class="app-page"><div class="detail-toolbar"><div class="detail-identity"><h1 class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="app" data-meta-field="name">${escapeHtml(app.name)}</h1><p class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="app" data-meta-field="description">${escapeHtml(app.description)}</p></div><div class="top-controls">${topControls}</div></div>
-    <form id="app-run-form" class="control-panel">
-      <div class="control-grid">${controlFields}</div>
-      <div class="run-footer"><span>Runs locally in this workspace.</span><button class="primary run-app" type="submit" data-run-app="${escapeHtml(app.slug)}">Run</button></div>
-    </form>
-    ${appHistoryOpen ? renderRunHistory() : ''}
-    ${app.results.length ? `<section class="results-section"><h2>Results</h2><div class="results-grid">${resultPanels || '<div class="empty compact"><p>Run the App to see results.</p></div>'}</div></section>` : ''}
+    ${controlPanel}
   </div>`;
-}
-
-function renderRunHistory() {
-  const records = appRunHistory.length ? appRunHistory.map((run) => {
-    const failed = run.status === 'failed';
-    const timestamp = new Date(run.finishedAt || run.startedAt);
-    const when = Number.isNaN(timestamp.valueOf()) ? '' : timestamp.toLocaleString();
-    const duration = Number(run.durationMs) >= 1000 ? `${(Number(run.durationMs) / 1000).toFixed(1)}s` : `${Math.max(0, Number(run.durationMs) || 0)}ms`;
-    const logs = (run.logs || []).length
-      ? `<pre>${escapeHtml(run.logs.join('\n'))}</pre>`
-      : '<p class="muted">No messages were recorded.</p>';
-    const error = failed && run.error ? `<p class="run-error">${escapeHtml(run.error)}</p>` : '';
-    const details = failed && run.details ? `<details><summary>Technical details</summary><pre>${escapeHtml(run.details)}</pre></details>` : '';
-    return `<article class="run-record ${failed ? 'failed' : 'completed'}">
-      <div class="run-record-heading"><strong>${failed ? 'Failed' : 'Completed'}</strong><span>${escapeHtml(when)} · ${escapeHtml(duration)}</span></div>
-      ${error}${logs}${details}
-    </article>`;
-  }).join('') : '<div class="empty compact"><p>No runs recorded yet.</p></div>';
-  return `<section class="run-history-section"><div class="run-history-heading"><h2>Run history</h2><button class="secondary small" id="close-run-history" type="button">Close</button></div><div class="run-history-list">${records}</div></section>`;
 }
 
 function renderAppControl(control) {
@@ -326,17 +363,8 @@ function renderAppControl(control) {
   return `<label>${escapeHtml(control.label || control.name)}<input name="${escapeHtml(control.name)}" type="${control.type === 'number' ? 'number' : 'text'}" value="${escapeHtml(value)}" ${required}></label>`;
 }
 
-function renderResult(result) {
-  if (result.type === 'table') {
-    const head = (result.columns || []).map((column) => `<th>${escapeHtml(column)}</th>`).join('');
-    const body = (result.rows || []).map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('');
-    return `<article class="result-card table-result"><h3>${escapeHtml(result.label || 'Results')}</h3><div class="table-wrap"><table class="result-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></article>`;
-  }
-  return `<article class="result-card"><h3>${escapeHtml(result.label || 'Result')}</h3><div class="summary-output">${escapeHtml(result.content || '')}</div></article>`;
-}
-
 function promptDetail(prompt) {
-  const controls = `<button class="secondary copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy prompt</button>${iconButton('remove', 'Delete Prompt', `data-delete-kind="prompt" data-delete-slug="${escapeHtml(prompt.slug)}"`)}`;
+  const controls = `${iconButton('copy', 'Copy', `data-copy-prompt="${escapeHtml(prompt.slug)}"`)}${iconButton('remove', 'Delete Prompt', `data-delete-kind="prompt" data-delete-slug="${escapeHtml(prompt.slug)}"`)}`;
   return `<div class="prompt-page"><div class="detail-toolbar"><div class="detail-identity"><h1 class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="prompt" data-meta-field="name">${escapeHtml(prompt.name)}</h1><p class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="prompt" data-meta-field="description">${escapeHtml(prompt.description)}</p></div><div class="top-controls">${controls}</div></div>
     <form id="prompt-form" class="prompt-editor">
       <label for="prompt-content">Prompt</label>
@@ -383,7 +411,7 @@ function inboxCell(file) {
     return `<span class="inbox-cell inbox-protected" role="gridcell"><span data-tooltip="${escapeHtml(inbox.reason || 'This folder cannot become an Inbox.')}">--</span></span>`;
   }
   const enabled = Boolean(inbox.enabled);
-  const controls = inbox.configured ? `${inbox.instructionsAvailable ? iconButton('instructions', 'Open Instructions', `data-open-inbox-file="${escapeHtml(inbox.instructionsPath)}"`) : ''}${inbox.dataAvailable ? iconButton('data', 'Open Data', `data-open-inbox-data="${escapeHtml(inbox.table)}"`) : ''}${inbox.issues?.length ? iconButton('warning', inbox.reason || 'Inbox needs attention', `data-repair-inbox="${escapeHtml(file.path)}"`) : ''}` : '';
+  const controls = inbox.configured ? `${inbox.instructionsAvailable ? iconButton('instructions', 'Edit Instructions', `data-open-inbox-file="${escapeHtml(inbox.instructionsPath)}"`) : ''}${inbox.dataAvailable ? iconButton('data', 'Open Data', `data-open-inbox-data="${escapeHtml(inbox.table)}"`) : ''}${inbox.issues?.length ? iconButton('warning', inbox.reason || 'Inbox needs attention', `data-repair-inbox="${escapeHtml(file.path)}"`) : ''}` : '';
   return `<span class="inbox-cell" role="gridcell">
     <button class="inbox-switch ${enabled ? 'on' : ''}" role="switch" aria-checked="${enabled}" aria-label="${enabled ? 'Turn off' : 'Turn on'} Inbox for ${escapeHtml(file.name)}" data-inbox-toggle="${escapeHtml(file.path)}" data-inbox-configured="${Boolean(inbox.configured)}" data-inbox-has-issues="${Boolean(inbox.issues?.length)}"><span></span></button>
     ${controls}
@@ -417,6 +445,11 @@ function sortFiles(files) {
     if (fileSort === 'size') comparison = left.size - right.size;
     return comparison * direction;
   });
+}
+
+function rememberFileSort() {
+  try { localStorage.setItem('runlet-file-sort', JSON.stringify({ sort: fileSort, direction: fileSortDirection })); }
+  catch { /* Sorting still works for this visit when browser storage is unavailable. */ }
 }
 
 function fileKind(file) {
@@ -477,40 +510,59 @@ function bindEvents() {
     render();
     if (view === 'connections') loadConnections();
   });
-  document.querySelectorAll('[data-app]').forEach((card) => card.onclick = (event) => {
-    if (event.target.closest('button,a')) return;
-    selectedApp = state.apps.find((app) => app.slug === card.dataset.app);
-    appResults = [];
-    appInputValues = {};
-    appRunHistory = [];
-    appHistoryOpen = false;
-    render();
-  });
   document.querySelectorAll('[data-open-app]').forEach((button) => button.onclick = (event) => {
     event.stopPropagation();
-    selectedApp = state.apps.find((app) => app.slug === button.dataset.openApp);
-    appResults = [];
-    appInputValues = {};
-    appRunHistory = [];
-    appHistoryOpen = false;
-    render();
+    appRunModal(button.dataset.openApp);
   });
   document.querySelectorAll('[data-prompt]').forEach((card) => card.onclick = (event) => {
-    if (event.target.closest('button,a')) return;
-    selectedPrompt = state.prompts.find((prompt) => prompt.slug === card.dataset.prompt);
-    render();
+    if (event.target.closest('button,a,form,details,[contenteditable]')) return;
+    promptEditorModal(card.dataset.prompt);
   });
   document.querySelectorAll('[data-copy-prompt]').forEach((button) => button.onclick = (event) => { event.stopPropagation(); copyPrompt(button.dataset.copyPrompt); });
   bindListControls('app');
   bindListControls('prompt');
   bindListControls('table');
+  bindListControls('inbox');
   bindSimpleListSearch('inbox-data', inboxDataSearch, (value) => { inboxDataSearch = value; });
   bindSimpleListSearch('table-list', tablesSearch, (value) => { tablesSearch = value; });
   bindSimpleListSearch('connection', connectionSearch, (value) => { connectionSearch = value; });
   document.querySelectorAll('[data-delete-kind]').forEach((button) => button.onclick = () => confirmDeleteItem(button.dataset.deleteKind, button.dataset.deleteSlug));
+  document.querySelectorAll('[data-start-card-edit]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    editingCard = cardEditKey(button.dataset.startCardEdit, button.dataset.editId);
+    render();
+    requestAnimationFrame(() => {
+      const input = document.querySelector('[data-card-edit-form] input');
+      input?.focus();
+      input?.select();
+    });
+  }));
+  document.querySelectorAll('[data-cancel-card-edit]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    editingCard = null;
+    render();
+  }));
+  document.querySelectorAll('[data-card-edit-form]').forEach((form) => {
+    form.addEventListener('click', (event) => event.stopPropagation());
+    form.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      editingCard = null;
+      render();
+    });
+    form.addEventListener('submit', saveCardMetadata);
+  });
+  document.querySelectorAll('[data-description-toggle]').forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const key = button.dataset.descriptionToggle;
+    if (expandedDescriptions.has(key)) expandedDescriptions.delete(key);
+    else expandedDescriptions.add(key);
+    render();
+  });
+  requestAnimationFrame(revealDescriptionToggles);
   document.querySelectorAll('[data-file-path]').forEach((button) => button.onclick = () => openFolder(button.dataset.filePath));
   bindFileBrowser();
-  document.querySelector('#back')?.addEventListener('click', () => { selectedApp = null; selectedPrompt = null; selectedDataTable = null; dataTable = null; appResults = []; appInputValues = {}; appRunHistory = []; appHistoryOpen = false; render(); });
+  document.querySelector('#back')?.addEventListener('click', () => { selectedApp = null; selectedPrompt = null; selectedDataTable = null; dataTable = null; appInputValues = {}; render(); });
   document.querySelector('#refresh')?.addEventListener('click', refresh);
   document.querySelector('#workspace-switch')?.addEventListener('click', workspaceSwitcher);
   const workspacePath = document.querySelector('.workspace-breadcrumb');
@@ -518,10 +570,7 @@ function bindEvents() {
   document.querySelectorAll('[data-info-text]').forEach((button) => button.addEventListener('click', () => infoModal(button.dataset.infoText)));
   document.querySelector('#refresh-connections')?.addEventListener('click', loadConnections);
   document.querySelectorAll('[data-connection]').forEach((button) => button.onclick = () => changeConnection(button));
-  document.querySelector('#prompt-form')?.addEventListener('submit', savePrompt);
-  document.querySelector('#app-run-form')?.addEventListener('submit', runApp);
-  document.querySelector('#app-run-history')?.addEventListener('click', toggleAppRunHistory);
-  document.querySelector('#close-run-history')?.addEventListener('click', () => { appHistoryOpen = false; render(); });
+  document.querySelectorAll('#app-run-form, [data-app-run-form]').forEach((form) => form.addEventListener('submit', runApp));
   bindDataBrowser();
   document.querySelectorAll('[data-meta-field]').forEach((element) => {
     element.addEventListener('keydown', (event) => {
@@ -529,6 +578,14 @@ function bindEvents() {
     });
     element.addEventListener('blur', saveMetadata);
   });
+}
+
+function appRunModal(slug) {
+  const appConfig = state.apps.find((item) => item.slug === slug);
+  if (!appConfig) return;
+  appInputValues = {};
+  modal(`<div class="modal-head"><div><h2>${escapeHtml(appConfig.name)}</h2><p>${escapeHtml(appConfig.description)}</p></div><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div><form id="app-run-form" class="control-panel modal-control-panel"><div class="control-grid">${appConfig.controls.map((control) => renderAppControl(control)).join('')}</div><div class="run-footer"><span>Runs locally in this workspace.</span><button class="primary run-app" type="submit" data-run-app="${escapeHtml(slug)}">Run</button></div></form>`);
+  document.querySelector('#app-run-form').addEventListener('submit', runApp);
 }
 
 async function loadDataTable(tableName) {
@@ -546,9 +603,13 @@ function bindDataBrowser() {
   document.querySelectorAll('[data-data-file-path]').forEach((button) => button.addEventListener('click', () => void openFolder(button.dataset.dataFilePath, 'files')));
   document.querySelector('[data-tables-home]')?.addEventListener('click', () => { selectedDataTable = null; dataTable = null; render(); });
   document.querySelector('#new-data-table')?.addEventListener('click', newDataTableModal);
-  document.querySelector('[data-delete-data-table]')?.addEventListener('click', confirmDeleteDataTable);
+  document.querySelector('[data-delete-data-table]')?.addEventListener('click', () => confirmDeleteDataTable());
+  document.querySelectorAll('[data-delete-table-name]').forEach((button) => button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    confirmDeleteDataTable(button.dataset.deleteTableName);
+  }));
   document.querySelectorAll('[data-data-table]').forEach((card) => card.onclick = (event) => {
-    if (event.target.closest('button,a')) return;
+    if (event.target.closest('button,a,form,details,[contenteditable]')) return;
     openDataTable(card.dataset.dataTable);
   });
   document.querySelectorAll('[data-open-data-table]').forEach((button) => button.onclick = (event) => {
@@ -588,6 +649,32 @@ function bindDataBrowser() {
       void pasteDataCells(cell, text);
     });
   });
+}
+
+function revealDescriptionToggles() {
+  document.querySelectorAll('.card-description').forEach((wrapper) => {
+    const paragraph = wrapper.querySelector('p');
+    const button = document.querySelector(`[data-description-toggle="${CSS.escape(wrapper.dataset.descriptionKey)}"]`);
+    if (!paragraph || !button) return;
+    button.hidden = !wrapper.classList.contains('expanded') && paragraph.scrollHeight <= paragraph.clientHeight + 1;
+  });
+}
+
+async function saveCardMetadata(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const kind = form.dataset.editKind;
+  const id = form.dataset.editId;
+  const values = Object.fromEntries(new FormData(form));
+  const endpoint = kind === 'table' ? `/api/data/tables/${encodeURIComponent(id)}` : `/api/${kind}s/${encodeURIComponent(id)}`;
+  try {
+    await api(endpoint, { method: 'PATCH', body: JSON.stringify({ workspaceId: state.selected.id, name: values.name, description: values.description }) });
+    editingCard = null;
+    await refresh();
+    toast('Details saved.');
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function newDataTableModal() {
@@ -778,7 +865,7 @@ function bindSimpleListSearch(kind, value, save) {
 }
 
 function bindListControls(kind) {
-  const plural = `${kind}s`;
+  const plural = kind === 'inbox' ? 'inboxes' : `${kind}s`;
   const input = document.querySelector(`#${kind}-search`);
   if (input) {
     input.addEventListener('input', () => {
@@ -860,9 +947,19 @@ function bindListControls(kind) {
 
   list.querySelectorAll('[data-drag-kind]').forEach((handle) => {
     const card = handle.closest('[data-order-item]');
-    handle.addEventListener('click', (event) => event.stopPropagation());
+    handle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      hideQuickTooltip();
+      const menu = handle.closest('.list-item-menu');
+      if (!menu) return;
+      document.querySelectorAll('.list-item-menu[open]').forEach((other) => { if (other !== menu) other.removeAttribute('open'); });
+    });
     handle.addEventListener('pointerdown', () => {
-      if (!list.classList.contains('searching')) card.draggable = true;
+      if (list.classList.contains('searching')) return;
+      card.draggable = true;
+      const stopUnusedDrag = () => { if (!draggedCard) card.draggable = false; };
+      document.addEventListener('pointerup', stopUnusedDrag, { once: true });
+      document.addEventListener('pointercancel', stopUnusedDrag, { once: true });
     });
     card.addEventListener('dragstart', (event) => {
       if (list.classList.contains('searching')) {
@@ -919,6 +1016,11 @@ function applyListFilter(kind, query) {
   const normalized = String(query || '').trim().toLowerCase();
   const list = document.querySelector(`[data-filter-list="${kind}"]`);
   list?.classList.toggle('searching', Boolean(normalized));
+  list?.querySelectorAll('[data-drag-kind]').forEach((handle) => {
+    const hasMenu = Boolean(handle.closest('.list-item-menu'));
+    const label = normalized ? (hasMenu ? 'Click for options' : 'Reordering unavailable while searching') : (hasMenu ? 'Drag to reorder · Click for options' : 'Drag to reorder');
+    handle.dataset.tooltip = label;
+  });
   let matches = 0;
   list?.querySelectorAll('[data-search-text]').forEach((card) => {
     card.hidden = normalized && !card.dataset.searchText.includes(normalized);
@@ -932,12 +1034,14 @@ async function saveListOrder(kind, list) {
   const visibleOrder = [...list.querySelectorAll('[data-order-item]:not([hidden])')].map((card) => card.dataset.orderItem);
   const visible = new Set(visibleOrder);
   let visibleIndex = 0;
-  const items = kind === 'tables' ? state.dataTables.filter((item) => item.source_kind === 'table') : state[kind];
-  const itemId = (item) => kind === 'tables' ? item.table_name : item.slug;
+  const tableKind = ['tables', 'inboxes'].includes(kind);
+  const items = kind === 'tables' ? state.dataTables.filter((item) => item.source_kind === 'table')
+    : kind === 'inboxes' ? state.dataTables.filter((item) => item.source_kind !== 'table') : state[kind];
+  const itemId = (item) => tableKind ? item.table_name : item.slug;
   const slugs = items.map((item) => visible.has(itemId(item)) ? visibleOrder[visibleIndex++] : itemId(item));
   try {
     const ordered = await api(`/api/order/${kind}`, { method: 'PUT', body: JSON.stringify({ workspaceId: state.selected.id, slugs }) });
-    if (kind === 'tables') state.dataTables = ordered;
+    if (tableKind) state.dataTables = ordered;
     else state[kind] = ordered;
     render();
   } catch (error) {
@@ -1037,7 +1141,7 @@ function bindFileBrowser() {
   }));
   document.querySelectorAll('[data-open-inbox-file]').forEach((button) => button.addEventListener('click', (event) => {
     event.stopPropagation();
-    void openFile(button.dataset.openInboxFile);
+    void instructionFileEditorModal(button.dataset.openInboxFile);
   }));
   document.querySelectorAll('[data-open-inbox-data]').forEach((button) => button.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -1066,12 +1170,14 @@ function bindFileBrowser() {
   document.querySelectorAll('[data-file-sort]').forEach((button) => button.onclick = () => {
     fileSort = button.dataset.fileSort;
     fileSortDirection = 'ascending';
+    rememberFileSort();
     render();
   });
   document.querySelectorAll('[data-sort-column]').forEach((button) => button.onclick = () => {
     const next = button.dataset.sortColumn;
     if (fileSort === next) fileSortDirection = fileSortDirection === 'ascending' ? 'descending' : 'ascending';
     else { fileSort = next; fileSortDirection = 'ascending'; }
+    rememberFileSort();
     render();
   });
 
@@ -1184,6 +1290,7 @@ function bindFileBrowser() {
 }
 
 function dismissFileTransientState(event) {
+  document.querySelectorAll('.list-item-menu[open]').forEach((menu) => { if (!menu.contains(event.target)) menu.removeAttribute('open'); });
   document.querySelectorAll('.data-menu[open]').forEach((menu) => { if (!menu.contains(event.target)) menu.removeAttribute('open'); });
   const sortMenu = document.querySelector('.sort-menu[open]');
   if (sortMenu && !sortMenu.contains(event.target)) sortMenu.removeAttribute('open');
@@ -1364,28 +1471,54 @@ async function openFile(path) {
   } catch (error) { toast(error.message, true); }
 }
 
-async function loadAppResults() {
-  if (!selectedApp || !selectedApp.results.length) return;
-  const slug = selectedApp.slug;
+async function instructionFileEditorModal(path) {
+  const fileName = path.split('/').at(-1);
+  const folderName = path.split('/').slice(0, -1).at(-1) || state.selected.name;
   try {
-    appResults = await api(`/api/apps/${encodeURIComponent(slug)}/results?workspaceId=${encodeURIComponent(state.selected.id)}`);
-    if (selectedApp?.slug === slug) render();
+    const { content } = await api(`/api/files/read?workspaceId=${encodeURIComponent(state.selected.id)}&path=${encodeURIComponent(path)}`);
+    modal(`<div class="modal-head instruction-editor-head"><div><h2>Edit Instructions</h2><p>${escapeHtml(folderName)} Inbox</p></div><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
+      <form id="instruction-file-editor-form" class="instruction-editor" data-file-path="${escapeHtml(path)}">
+        <textarea class="instruction-editor-content" name="content" aria-label="Instructions" spellcheck="true" required>${escapeHtml(content)}</textarea>
+        <div class="instruction-editor-actions"><span class="editor-file-name">${escapeHtml(fileName)}</span><button class="editor-save" type="submit" aria-label="Save" data-tooltip="Save">${icons.check}</button></div>
+      </form>`, { className: 'editor-modal', clickAway: true });
+    document.querySelector('#instruction-file-editor-form').onsubmit = saveInstructionFile;
+    requestAnimationFrame(() => document.querySelector('#instruction-file-editor-form textarea')?.focus());
   } catch (error) { toast(error.message, true); }
 }
 
-async function loadAppRunHistory() {
-  if (!selectedApp) return;
-  const slug = selectedApp.slug;
-  appRunHistory = await api(`/api/apps/${encodeURIComponent(slug)}/runs?workspaceId=${encodeURIComponent(state.selected.id)}`);
+async function saveInstructionFile(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  const content = new FormData(form).get('content');
+  button.disabled = true;
+  try {
+    await api('/api/files', { method: 'PUT', body: JSON.stringify({ workspaceId: state.selected.id, path: form.dataset.filePath, content }) });
+    closeModal();
+    toast('Instructions saved.');
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message, true);
+  }
 }
 
-async function toggleAppRunHistory() {
-  appHistoryOpen = !appHistoryOpen;
-  if (appHistoryOpen) {
-    try { await loadAppRunHistory(); }
-    catch (error) { toast(error.message, true); }
-  }
-  render();
+function appRepairPrompt(name, workspaceName, message) {
+  const location = workspaceName ? ` in the “${workspaceName}” workspace` : '';
+  return `Use Runlet to diagnose and fix the App “${name}”${location}. The latest run failed with this error:\n\n${message}\n\nInspect this App’s recent run history and logs, fix the underlying issue, run the App again, and verify its declared results.`;
+}
+
+function showRunWindow(viewWindow, name, status, message, details = {}) {
+  if (!viewWindow) return;
+  const failed = status === 'failed';
+  const title = status === 'running' ? 'Running…' : failed ? 'App did not finish' : 'Finished';
+  const symbol = status === 'running' ? '•••' : failed ? '×' : '✓';
+  const repairPrompt = failed ? appRepairPrompt(name, details.workspaceName, message) : '';
+  const help = failed ? `<section class="help"><h2>Ask your AI to fix it</h2><p>Copy this prompt into your connected AI. It identifies the App and tells the AI to inspect Runlet’s saved logs.</p><textarea id="repair-prompt" readonly>${escapeHtml(repairPrompt)}</textarea><button id="copy-repair" type="button">Copy repair prompt</button></section>` : '';
+  viewWindow.document.open();
+  viewWindow.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(name)} — ${title}</title><style>
+    :root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#202d28;background:#f4f6f4}*{box-sizing:border-box}body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px}.card{width:min(600px,100%);padding:34px;border:1px solid #dfe5e1;border-radius:16px;background:#fff;box-shadow:0 12px 38px rgba(30,48,40,.08);text-align:center}.mark{width:52px;height:52px;margin:0 auto 18px;display:grid;place-items:center;border-radius:50%;background:${failed ? '#f8e9e7' : '#e7f1eb'};color:${failed ? '#a24a43' : '#36785a'};font-size:26px;font-weight:750}h1{margin:0;font-size:24px;letter-spacing:-.02em}p{margin:10px 0 0;color:#68756f;line-height:1.55}.error{white-space:pre-wrap}.name{margin-top:20px;color:#202d28;font-weight:700;font-size:14px}.help{margin-top:26px;padding-top:24px;border-top:1px solid #e2e7e4;text-align:left}.help h2{margin:0;font-size:16px}.help p{margin:6px 0 12px;font-size:13px}.help textarea{width:100%;min-height:150px;resize:vertical;padding:12px;border:1px solid #cfd8d2;border-radius:9px;background:#f7f8f7;color:#35433d;font:13px/1.5 inherit}.help button{width:100%;margin-top:10px;padding:10px 14px;border:0;border-radius:9px;background:#36785a;color:#fff;font:inherit;font-weight:700;cursor:pointer}.help button:focus-visible{outline:3px solid #bdd8c8;outline-offset:2px}
+  </style></head><body><main class="card"><div class="mark">${symbol}</div><h1>${title}</h1><p class="error">${escapeHtml(message)}</p><p class="name">${escapeHtml(name)}</p>${help}</main>${failed ? `<script>document.querySelector('#copy-repair').addEventListener('click',async function(){const field=document.querySelector('#repair-prompt');try{await navigator.clipboard.writeText(field.value);this.textContent='Copied';}catch(error){field.focus();field.select();document.execCommand('copy');this.textContent='Copied';}});<\/script>` : ''}</body></html>`);
+  viewWindow.document.close();
 }
 
 async function runApp(event) {
@@ -1393,36 +1526,50 @@ async function runApp(event) {
   const form = event.currentTarget;
   const button = form.querySelector('[data-run-app]');
   const slug = button.dataset.runApp;
-  const hasPage = selectedApp?.slug === slug && selectedApp.hasPage;
-  const viewWindow = hasPage ? window.open('about:blank', '_blank') : null;
+  const appConfig = state.apps.find((item) => item.slug === slug) || selectedApp;
+  const hasPage = Boolean(appConfig?.hasPage);
+  const appName = appConfig?.name || 'App';
+  const viewWindow = window.open('about:blank', '_blank');
   if (viewWindow) {
     viewWindow.opener = null;
-    viewWindow.document.title = `${selectedApp.name} — Running`;
-    viewWindow.document.body.innerHTML = '<p style="font: 15px system-ui; padding: 24px; color: #555">Running App…</p>';
+    showRunWindow(viewWindow, appName, 'running', 'Working in your workspace.');
   }
   appInputValues = Object.fromEntries(new FormData(form));
-  const old = button.textContent;
+  const iconOnly = button.classList.contains('card-action-button');
+  const old = iconOnly ? button.innerHTML : button.textContent;
   button.disabled = true;
-  button.textContent = 'Running…';
+  if (iconOnly) {
+    button.dataset.tooltip = 'Running…';
+    button.setAttribute('aria-label', 'Running');
+  } else button.textContent = 'Running…';
   try {
     const response = await api(`/api/apps/${encodeURIComponent(slug)}/run`, { method:'POST', body: JSON.stringify({ workspaceId: state.selected.id, input: appInputValues }) });
     await refresh();
-    if (appHistoryOpen) { await loadAppRunHistory(); render(); }
     if (hasPage) {
       if (viewWindow) viewWindow.location.replace(`/app-view/${state.selected.id}/${encodeURIComponent(slug)}`);
-      toast(viewWindow ? (response.logs?.at(-1) || 'App finished. Its page opened in a new tab.') : 'App finished. Use Open App to view it.');
+      toast(viewWindow ? (response.logs?.at(-1) || 'App finished.') : 'App finished, but its page could not open.');
     } else {
-      await loadAppResults();
-      toast(response.logs?.at(-1) || 'App finished.');
+      const message = response.logs?.at(-1) || 'The App completed successfully. Any generated files are available in Files.';
+      showRunWindow(viewWindow, appName, 'completed', message);
+      toast(message);
     }
   } catch (error) {
-    if (viewWindow) viewWindow.close();
+    let failureMessage = error.message || 'The App could not finish.';
+    try {
+      const history = await api(`/api/apps/${encodeURIComponent(slug)}/runs?workspaceId=${encodeURIComponent(state.selected.id)}`);
+      const latestFailure = history.find((item) => item.status === 'failed');
+      if (latestFailure?.error) failureMessage = latestFailure.error;
+      const lastLog = latestFailure?.logs?.at(-1);
+      if (lastLog) failureMessage += `\n\nLast App message: ${lastLog}`;
+    } catch {}
+    showRunWindow(viewWindow, appName, 'failed', failureMessage, { workspaceName: state.selected?.name });
     button.disabled = false;
-    button.textContent = old;
-    appHistoryOpen = true;
-    try { await loadAppRunHistory(); } catch {}
-    render();
-    toast('Something went wrong. Check Run history.', true);
+    if (iconOnly) {
+      button.innerHTML = old;
+      button.dataset.tooltip = 'Run';
+      button.setAttribute('aria-label', 'Run');
+    } else button.textContent = old;
+    toast(failureMessage, true);
   }
 }
 
@@ -1459,36 +1606,45 @@ async function copyPrompt(slug) {
 
 async function savePrompt(event) {
   event.preventDefault();
-  const content = new FormData(event.currentTarget).get('content');
+  const form = event.currentTarget;
+  const slug = form.dataset.promptSlug;
+  const content = new FormData(form).get('content');
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
   try {
-    const updated = await api(`/api/prompts/${encodeURIComponent(selectedPrompt.slug)}`, { method: 'PUT', body: JSON.stringify({ workspaceId: state.selected.id, content }) });
-    selectedPrompt = updated;
+    const updated = await api(`/api/prompts/${encodeURIComponent(slug)}`, { method: 'PUT', body: JSON.stringify({ workspaceId: state.selected.id, content }) });
+    state.prompts = state.prompts.map((prompt) => prompt.slug === slug ? updated : prompt);
+    closeModal();
     await refresh();
     toast('Prompt saved.');
-  } catch (error) { toast(error.message, true); }
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message, true);
+  }
 }
 
-function confirmDeleteDataTable() {
-  if (!dataTable || dataTable.source_kind !== 'table') return;
+function confirmDeleteDataTable(tableName = dataTable?.table_name) {
+  const table = (state.dataTables || []).find((item) => item.table_name === tableName) || dataTable;
+  if (!table || table.source_kind !== 'table') return;
   modal(`<div class="modal-head"><h2>Delete Table?</h2><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
     <div class="delete-confirmation">
-      <p><b>${escapeHtml(dataTable.display_name)}</b></p>
+      <p><b>${escapeHtml(table.display_name)}</b></p>
       <p>Every row and column in this Table will be permanently deleted.</p>
       <div class="confirmation-actions"><button class="secondary modal-close-action">Cancel</button><button class="danger-button" data-confirm-delete-table>Delete Table</button></div>
     </div>`);
   document.querySelector('.modal-close-action').onclick = closeModal;
-  document.querySelector('[data-confirm-delete-table]').onclick = (event) => deleteDataTable(event.currentTarget);
+  document.querySelector('[data-confirm-delete-table]').onclick = (event) => deleteDataTable(table.table_name, table.display_name, event.currentTarget);
 }
 
-async function deleteDataTable(button) {
-  if (!dataTable || dataTable.source_kind !== 'table') return;
-  const name = dataTable.display_name;
+async function deleteDataTable(tableName, name, button) {
   button.disabled = true;
   button.textContent = 'Deleting…';
   try {
-    await api(`/api/data/tables/${encodeURIComponent(dataTable.table_name)}`, { method: 'DELETE', body: JSON.stringify({ workspaceId: state.selected.id }) });
-    selectedDataTable = null;
-    dataTable = null;
+    await api(`/api/data/tables/${encodeURIComponent(tableName)}`, { method: 'DELETE', body: JSON.stringify({ workspaceId: state.selected.id }) });
+    if (selectedDataTable === tableName) {
+      selectedDataTable = null;
+      dataTable = null;
+    }
     closeModal();
     await refresh();
     toast(`${name} was deleted.`);
@@ -1500,8 +1656,10 @@ async function deleteDataTable(button) {
 }
 
 function confirmDeleteItem(kind, slug) {
-  const item = kind === 'app' ? selectedApp : selectedPrompt;
-  if (!item || item.slug !== slug) return;
+  const item = kind === 'app'
+    ? state.apps.find((candidate) => candidate.slug === slug)
+    : state.prompts.find((candidate) => candidate.slug === slug);
+  if (!item) return;
   const label = kind === 'app' ? 'App' : 'Prompt';
   const detail = kind === 'app'
     ? 'Its inputs, outputs, and generated files will also be permanently deleted.'
@@ -1517,19 +1675,20 @@ function confirmDeleteItem(kind, slug) {
 }
 
 async function deleteItem(kind, slug, button) {
-  const item = kind === 'app' ? selectedApp : selectedPrompt;
-  if (!item || item.slug !== slug) return;
+  const item = kind === 'app'
+    ? state.apps.find((candidate) => candidate.slug === slug)
+    : state.prompts.find((candidate) => candidate.slug === slug);
+  if (!item) return;
   button.disabled = true;
   button.textContent = 'Deleting…';
   try {
     await api(`/api/${kind}s/${encodeURIComponent(slug)}`, { method: 'DELETE', body: JSON.stringify({ workspaceId: state.selected.id }) });
     if (kind === 'app') {
-      selectedApp = null;
-      appResults = [];
+      if (selectedApp?.slug === slug) selectedApp = null;
       appInputValues = {};
       view = 'apps';
     } else {
-      selectedPrompt = null;
+      if (selectedPrompt?.slug === slug) selectedPrompt = null;
       view = 'prompts';
     }
     closeModal();
@@ -1652,7 +1811,7 @@ async function removeWorkspace(id) {
 }
 
 function modal(content, { className = '', backdropClass = '', clickAway = false } = {}) {
-  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop ${backdropClass}">${clickAway ? '<button class="modal-clickaway" aria-label="Dismiss information"></button>' : ''}<section class="modal ${className}" role="dialog" aria-modal="true">${content}</section></div>`;
+  document.querySelector('#modal-root').innerHTML = `<div class="modal-backdrop ${backdropClass}">${clickAway ? '<button class="modal-clickaway" aria-label="Dismiss modal"></button>' : ''}<section class="modal ${className}" role="dialog" aria-modal="true">${content}</section></div>`;
   document.querySelector('.modal-close')?.addEventListener('click', closeModal);
   document.querySelector('.modal-clickaway')?.addEventListener('click', (event) => {
     event.preventDefault();
@@ -1676,21 +1835,39 @@ function toast(message, error = false) {
   setTimeout(() => { if (root) root.innerHTML = ''; }, 3200);
 }
 
-document.addEventListener('pointerdown', dismissFileTransientState);
+document.addEventListener('pointerdown', (event) => {
+  dismissFileTransientState(event);
+  const target = event.target.closest?.('[data-tooltip]');
+  if (target) {
+    tooltipSuppressedTarget = target;
+    hideQuickTooltip();
+  }
+});
+document.addEventListener('click', (event) => {
+  const target = event.target.closest?.('[data-tooltip]');
+  if (!target) return;
+  tooltipSuppressedTarget = target;
+  hideQuickTooltip();
+});
 document.addEventListener('pointerover', (event) => {
   const target = event.target.closest?.('[data-tooltip]');
   if (!target || target === tooltipTarget) return;
+  if (target === tooltipSuppressedTarget) return;
+  tooltipSuppressedTarget = null;
   hideQuickTooltip();
   tooltipTarget = target;
   tooltipTimer = setTimeout(() => showQuickTooltip(target), 500);
 });
 document.addEventListener('pointerout', (event) => {
   const target = event.target.closest?.('[data-tooltip]');
-  if (target && !target.contains(event.relatedTarget)) hideQuickTooltip();
+  if (target && !target.contains(event.relatedTarget)) {
+    if (target === tooltipSuppressedTarget) tooltipSuppressedTarget = null;
+    hideQuickTooltip();
+  }
 });
 document.addEventListener('focusin', (event) => {
   const target = event.target.closest?.('[data-tooltip]');
-  if (!target) return;
+  if (!target || target === tooltipSuppressedTarget) return;
   hideQuickTooltip();
   tooltipTarget = target;
   tooltipTimer = setTimeout(() => showQuickTooltip(target), 80);
@@ -1700,6 +1877,14 @@ document.addEventListener('focusout', (event) => {
 });
 document.addEventListener('scroll', hideQuickTooltip, true);
 window.addEventListener('resize', hideQuickTooltip);
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || document.querySelector('.modal-backdrop')) return;
+  const openMenus = document.querySelectorAll('.list-item-menu[open], .data-menu[open], .sort-menu[open]');
+  if (!openMenus.length) return;
+  event.preventDefault();
+  openMenus.forEach((menu) => menu.removeAttribute('open'));
+  hideQuickTooltip();
+});
 
 refresh().catch((error) => {
   app.innerHTML = `<main class="welcome"><section><h1>Runlet could not start</h1><p>${escapeHtml(error.message)}</p></section></main>`;

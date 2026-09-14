@@ -20,6 +20,7 @@ import {
   moveDataColumn as moveWorkspaceDataColumn,
   renameDataColumn as renameWorkspaceDataColumn,
   updateDataCell as updateWorkspaceDataCell,
+  updateDataTableMetadata as updateWorkspaceDataTableMetadata,
   writeDataRows as writeWorkspaceDataRows,
 } from './database.mjs';
 
@@ -605,16 +606,30 @@ export async function runApp(workspaceId, slug, input = {}) {
     }
     const result = await new Promise((resolve, reject) => {
       const worker = new Worker(workerPath, { workerData: { workspacePath: workspace.path, appDir: appDir, input: values }, resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32 } });
-      const timer = setTimeout(() => { worker.terminate(); reject(new Error('App exceeded the 30 second time limit.')); }, 30_000);
-      worker.once('message', (message) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
-        if (message.ok) return resolve(message);
-        const error = new Error(message.error || 'App failed.');
-        error.runLogs = message.logs;
-        error.runStack = message.stack;
-        reject(error);
+        callback(value);
+      };
+      const timer = setTimeout(() => {
+        worker.terminate();
+        finish(reject, new Error('The App exceeded the 30 second time limit. Ask your AI to inspect its recent run history and make the work smaller or faster.'));
+      }, 30_000);
+      worker.on('message', (message) => {
+        if (message?.kind !== 'app') return;
+        if (message?.ok) return finish(resolve, message);
+        const reportedMessage = typeof message?.error === 'string' ? message.error.trim() : '';
+        const error = new Error(reportedMessage || 'The App stopped without reporting what went wrong.');
+        error.runLogs = message?.logs;
+        error.runStack = message?.stack;
+        finish(reject, error);
       });
-      worker.once('error', (error) => { clearTimeout(timer); reject(error); });
+      worker.once('error', (error) => finish(reject, error));
+      worker.once('exit', (code) => {
+        if (!settled) finish(reject, new Error(`The App stopped unexpectedly before reporting a result (worker exit code ${code}).`));
+      });
     });
     const finishedAt = new Date();
     await appendAppRun(appDir, {
@@ -723,13 +738,13 @@ export async function listPrompts(workspaceId) {
 }
 
 export async function reorderItems(workspaceId, kind, slugs) {
-  if (!['apps', 'prompts', 'tables'].includes(kind)) throw new Error('Only Apps, Prompts, and Tables can be reordered.');
+  if (!['apps', 'prompts', 'tables', 'inboxes'].includes(kind)) throw new Error('Only Apps, Prompts, Tables, and Inbox Data can be reordered.');
   const workspace = await getWorkspace(workspaceId);
   const items = kind === 'apps' ? await listApps(workspace.id)
     : kind === 'prompts' ? await listPrompts(workspace.id)
-      : (await listDataTables(workspace.id)).filter((item) => item.source_kind === 'table');
+      : (await listDataTables(workspace.id)).filter((item) => kind === 'tables' ? item.source_kind === 'table' : item.source_kind !== 'table');
   const requested = Array.isArray(slugs) ? slugs.map(String) : [];
-  const existing = new Set(items.map((item) => kind === 'tables' ? item.table_name : item.slug));
+  const existing = new Set(items.map((item) => ['tables', 'inboxes'].includes(kind) ? item.table_name : item.slug));
   if (requested.length !== existing.size || new Set(requested).size !== requested.length || requested.some((slug) => !existing.has(slug))) {
     throw new Error(`The ${kind} list changed. Refresh and try again.`);
   }
@@ -944,17 +959,26 @@ export async function listDataTables(workspaceId) {
   await listInboxes(workspace.id, { includeDisabled: true });
   const tables = await readWorkspaceDataTables(workspace.path);
   const state = await loadState();
+  const inboxes = applySavedOrder(
+    tables.filter((table) => table.source_kind !== 'table').map((table) => ({ ...table, slug: table.table_name, name: table.display_name })),
+    state.orders?.[workspace.id]?.inboxes,
+  ).map(({ slug: _slug, name: _name, ...table }) => table);
   const standalone = tables.filter((table) => table.source_kind === 'table');
   const orderedStandalone = applySavedOrder(
     standalone.map((table) => ({ ...table, slug: table.table_name, name: table.display_name })),
     state.orders?.[workspace.id]?.tables,
   ).map(({ slug: _slug, name: _name, ...table }) => table);
-  return [...tables.filter((table) => table.source_kind !== 'table'), ...orderedStandalone];
+  return [...inboxes, ...orderedStandalone];
 }
 
 export async function createDataTable(workspaceId, name) {
   const workspace = await getWorkspace(workspaceId);
   return createWorkspaceDataTable(workspace.path, name);
+}
+
+export async function updateDataTableMetadata(workspaceId, table, metadata) {
+  const workspace = await getWorkspace(workspaceId);
+  return updateWorkspaceDataTableMetadata(workspace.path, table, metadata);
 }
 
 export async function deleteDataTable(workspaceId, table) {
@@ -1031,6 +1055,23 @@ export async function listFiles(workspaceId, relativePath = '.') {
 
 export async function readFile(workspaceId, relativePath) { const workspace = await getWorkspace(workspaceId); return fs.readFile(resolveInside(workspace.path, relativePath), 'utf8'); }
 export async function writeFile(workspaceId, relativePath, content) { const workspace = await getWorkspace(workspaceId); const target = resolveInside(workspace.path, relativePath); await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, content); return { path: relativePath }; }
+export async function readFileEncoded(workspaceId, relativePath, encoding = 'utf8') {
+  if (!['utf8', 'base64'].includes(encoding)) throw new Error('File encoding must be utf8 or base64.');
+  const workspace = await getWorkspace(workspaceId);
+  const data = await fs.readFile(resolveInside(workspace.path, relativePath));
+  return data.toString(encoding);
+}
+export async function writeFileEncoded(workspaceId, relativePath, data, encoding = 'utf8') {
+  if (!['utf8', 'base64'].includes(encoding)) throw new Error('File encoding must be utf8 or base64.');
+  const source = String(data);
+  if (encoding === 'base64') {
+    const compact = source.replace(/\s/g, '');
+    const valid = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(compact);
+    if (!valid) throw new Error('File data is not valid base64.');
+    return writeFile(workspaceId, relativePath, Buffer.from(compact, 'base64'));
+  }
+  return writeFile(workspaceId, relativePath, source);
+}
 export async function makeDirectory(workspaceId, relativePath) {
   const workspace = await getWorkspace(workspaceId);
   const target = resolveInside(workspace.path, relativePath);

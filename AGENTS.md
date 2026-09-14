@@ -4,11 +4,11 @@ This repository builds Runlet, a local workspace, App, and Prompt manager for pe
 
 ## Product principle
 
-The interface should feel like a file cabinet plus small programs with Run buttons and saved Prompts with Copy buttons. Keep source, folder paths, and technical details out of the default App view; the separate Files area and collapsed Run history are available when someone intentionally wants to inspect them. Do not add a terminal, code editor, debugger, Git UI, package manager, visual workflow builder, setup wizard, unnecessary disclosure, or unnecessary modal.
+The interface should feel like a file cabinet plus small programs with Run buttons and saved Prompts with Copy buttons. Keep source, folder paths, run history, and technical details out of the normal App interface; the separate Files area is available when someone intentionally wants to inspect files, and connected AI tools may inspect run records for diagnostics. Do not add a terminal, code editor, debugger, Git UI, package manager, visual workflow builder, setup wizard, unnecessary disclosure, or unnecessary modal.
 
 ## Workspaces
 
-Use the Runlet MCP tools for user workspace operations. List workspaces first when the intended folder is ambiguous. Select the named workspace before editing it. If the user names a workspace that does not exist, create or register that folder with `create_workspace` before continuing.
+Use the Runlet MCP tools for user workspace operations. Call `list_workspaces` first to resolve the workspace ID and selected workspace. Select the named workspace before editing it. If the user names a workspace that does not exist, create or register that folder with `create_workspace` before continuing.
 
 Never modify a folder that has not been registered as a Runlet workspace.
 
@@ -18,11 +18,11 @@ When asked to create or update an App:
 
 1. Inspect the selected workspace’s relevant files.
 2. Call `get_app_template`.
-3. Create `apps/<kebab-case-name>/runlet.json` with its editable name, description, controls, and result panels.
-4. Create `apps/<kebab-case-name>/run.js`.
-5. Create `apps/<kebab-case-name>/README.md` using the README contract in the root `README.md`.
+3. Use `create_directory` and `write_file` to create `apps/<kebab-case-name>/runlet.json` with its editable name, description, controls, and result panels.
+4. Use `write_file` to create `apps/<kebab-case-name>/run.js`.
+5. Use `write_file` to create `apps/<kebab-case-name>/README.md` using the README contract in the root `README.md`.
 6. Use `inputs/` for user-supplied source files and write generated files only beneath that App’s `outputs/` directory.
-7. Use Runlet's generated interface for simple controls and results. Add `index.html` when a richer browser interface is materially better. Keep its assets local, use relative URLs, and avoid CDNs unless genuinely necessary.
+7. Use Runlet's generated interface for simple controls. Add `index.html` when the App should show its results visually after running; processing-only Apps may use the standard completion page. Keep page assets local, use relative URLs, and avoid CDNs unless genuinely necessary.
 8. Keep the App portable: do not rely on machine-specific paths, per-App installs, native binaries, or a separate server.
 9. Use `run.log()` or `console.log()` for concise diagnostic messages. Runlet keeps the 50 most recent successful and failed runs.
 10. Run the App with `run_app`, inspect its declared results, output files, and run history, and fix failures before reporting completion.
@@ -34,8 +34,8 @@ App code is JavaScript-only. It receives `{ workspace, run, input, data, pdf, cs
 When asked to create or update a Prompt:
 
 1. Inspect the selected workspace and call `get_prompt_template`.
-2. Store its editable name and description at `prompts/<kebab-case-name>/runlet.json`.
-3. Store its instructions at `prompts/<kebab-case-name>/PROMPT.md`.
+2. Use `write_file` to store its editable name and description at `prompts/<kebab-case-name>/runlet.json`.
+3. Use `write_file` to store its instructions at `prompts/<kebab-case-name>/PROMPT.md`.
 4. Begin with a clear title and short description.
 5. State the inputs, work, and expected output clearly. Inputs may be files attached directly to the AI conversation.
 

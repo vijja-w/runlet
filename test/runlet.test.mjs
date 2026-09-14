@@ -13,6 +13,7 @@ const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'runlet-test-'));
 process.env.RUNLET_STATE_DIR = path.join(temporaryRoot, 'state');
 const runlet = await import('../src/workspaces.mjs');
 const connections = await import('../src/connections.mjs');
+const { mcpToolGroups } = await import('../src/mcp-tools.mjs');
 
 function simplePdf(text) {
   const escaped = String(text).replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
@@ -75,6 +76,9 @@ test('creates folders and safely moves files within a workspace', async () => {
   assert.equal(await runlet.readFile(current.id, 'note-copy.txt'), 'hello');
   await runlet.uploadFiles(current.id, 'Documents', [{ name: 'dropped.txt', data: Buffer.from('copied') }]);
   assert.equal(await runlet.readFile(current.id, 'Documents/dropped.txt'), 'copied');
+  await runlet.writeFileEncoded(current.id, 'Documents/binary.bin', 'AAEC/w==', 'base64');
+  assert.equal(await runlet.readFileEncoded(current.id, 'Documents/binary.bin', 'base64'), 'AAEC/w==');
+  await assert.rejects(runlet.writeFileEncoded(current.id, 'Documents/invalid.bin', 'not base64!', 'base64'), /valid base64/i);
   await runlet.deleteFile(current.id, 'note-copy.txt');
   await runlet.deleteFile(current.id, 'Documents');
 });
@@ -158,6 +162,7 @@ test('creates standalone workspace Tables', async () => {
   const current = await runlet.getCurrentWorkspace();
   const created = await runlet.createDataTable(current.id, 'Suppliers');
   assert.equal(created.display_name, 'Suppliers');
+  assert.equal(created.description, 'A table for organizing information.');
   assert.equal(created.source_kind, 'table');
   assert.equal(created.inbox_path, `.runlet/tables/${created.table_name}`);
   assert.deepEqual(created.columns, [{ name: 'Column 1', type: 'TEXT' }]);
@@ -167,9 +172,12 @@ test('creates standalone workspace Tables', async () => {
   await runlet.renameDataColumn(current.id, created.table_name, 'Column 1', 'Supplier');
   assert.equal((await runlet.getDataTable(current.id, created.table_name)).rows[0].values.Supplier, 'Golden Grain');
   await assert.rejects(runlet.createDataTable(current.id, 'suppliers'), /already exists/i);
+  const renamed = await runlet.updateDataTableMetadata(current.id, created.table_name, { name: 'Preferred Suppliers', description: 'Vendors we buy from regularly.' });
+  assert.equal(renamed.display_name, 'Preferred Suppliers');
+  assert.equal(renamed.description, 'Vendors we buy from regularly.');
   const second = await runlet.createDataTable(current.id, 'Markets');
   const ordered = await runlet.reorderItems(current.id, 'tables', [second.table_name, created.table_name]);
-  assert.deepEqual(ordered.filter((table) => table.source_kind === 'table').map((table) => table.display_name), ['Markets', 'Suppliers']);
+  assert.deepEqual(ordered.filter((table) => table.source_kind === 'table').map((table) => table.display_name), ['Markets', 'Preferred Suppliers']);
   await runlet.deleteDataTable(current.id, created.table_name);
   await assert.rejects(runlet.getDataTable(current.id, created.table_name), /not found/i);
   await runlet.deleteDataTable(current.id, second.table_name);
@@ -459,12 +467,16 @@ test('shows version and update commands in the CLI', async () => {
   assert.match(helpResult.stdout, /runlet tools\s+Show the tools provided to connected AI apps/);
   assert.match(helpResult.stdout, /runlet libraries\s+Show the JavaScript APIs available to Apps/);
   const toolsResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'tools']);
+  const toolNames = mcpToolGroups.flatMap((group) => group.tools.map(([name]) => name));
+  assert.equal(toolNames.length, 30);
+  assert.equal(new Set(toolNames).size, 30);
   assert.match(toolsResult.stdout, /Runlet tools provided to connected AI apps/);
   assert.match(toolsResult.stdout, /list_inboxes\s+List enabled Runlet Inboxes/);
   assert.match(toolsResult.stdout, /get_inbox\s+Inspect one configured Inbox/);
-  assert.match(toolsResult.stdout, /update_inbox_instructions\s+Create or replace the instructions/);
+  assert.match(toolsResult.stdout, /write_file\s+Create or replace a text or binary file/);
   assert.match(toolsResult.stdout, /run_app\s+Run an App/);
-  assert.match(toolsResult.stdout, /create_prompt\s+Create a reusable provider-neutral Prompt/);
+  assert.match(toolsResult.stdout, /get_prompt_template\s+Get the authoritative Prompt structure/);
+  assert.doesNotMatch(toolsResult.stdout, /create_app|create_prompt|update_inbox_instructions|get_app_results/);
   assert.match(toolsResult.stdout, /only explicitly registered Runlet workspaces/);
   const librariesResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'libraries']);
   assert.match(librariesResult.stdout, /pdf\.extractText/);

@@ -21,6 +21,7 @@ async function openDatabase(workspacePath) {
     inbox_path TEXT UNIQUE NOT NULL,
     table_name TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     source_kind TEXT NOT NULL DEFAULT 'inbox',
     created_at TEXT NOT NULL
   );
@@ -33,6 +34,7 @@ async function openDatabase(workspacePath) {
   )`);
   const metadataColumns = new Set(db.prepare('PRAGMA table_info(_runlet_tables)').all().map((column) => column.name));
   if (!metadataColumns.has('source_kind')) db.exec("ALTER TABLE _runlet_tables ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'inbox'");
+  if (!metadataColumns.has('description')) db.exec("ALTER TABLE _runlet_tables ADD COLUMN description TEXT NOT NULL DEFAULT ''");
   return db;
 }
 
@@ -83,7 +85,7 @@ function coerce(value, type) {
 }
 
 function registeredTable(db, tableName) {
-  const table = db.prepare('SELECT inbox_path, table_name, display_name, source_kind FROM _runlet_tables WHERE table_name = ?').get(String(tableName));
+  const table = db.prepare('SELECT inbox_path, table_name, display_name, description, source_kind FROM _runlet_tables WHERE table_name = ?').get(String(tableName));
   if (!table) throw new Error('Data table not found.');
   return plain(table);
 }
@@ -177,14 +179,34 @@ export async function createDataTable(workspacePath, displayName) {
     db.exec('BEGIN IMMEDIATE');
     try {
       db.exec(`CREATE TABLE ${quote(chosenTableName)} (${quote(rowIdColumn)} INTEGER PRIMARY KEY AUTOINCREMENT, ${quote('Column 1')} TEXT)`);
-      db.prepare("INSERT INTO _runlet_tables (inbox_path, table_name, display_name, source_kind, created_at) VALUES (?, ?, ?, 'table', ?)")
-        .run(storagePath, chosenTableName, name, new Date().toISOString());
+      db.prepare("INSERT INTO _runlet_tables (inbox_path, table_name, display_name, description, source_kind, created_at) VALUES (?, ?, ?, ?, 'table', ?)")
+        .run(storagePath, chosenTableName, name, 'A table for organizing information.', new Date().toISOString());
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
     }
     return tableDescriptor(db, chosenTableName);
+  } finally {
+    db.close();
+  }
+}
+
+export async function updateDataTableMetadata(workspacePath, tableName, { name, description }) {
+  const db = await openDatabase(workspacePath);
+  try {
+    const table = registeredTable(db, tableName);
+    if (table.source_kind !== 'table') throw new Error('Inbox Data names are managed by their folders.');
+    const nextName = String(name ?? table.display_name).trim();
+    const nextDescription = String(description ?? table.description).trim();
+    if (!nextName) throw new Error('Name cannot be empty.');
+    if (!nextDescription) throw new Error('Description cannot be empty.');
+    const duplicate = db.prepare("SELECT 1 FROM _runlet_tables WHERE source_kind = 'table' AND table_name <> ? AND display_name = ? COLLATE NOCASE")
+      .get(table.table_name, nextName);
+    if (duplicate) throw new Error('A Table with that name already exists.');
+    db.prepare('UPDATE _runlet_tables SET display_name = ?, description = ? WHERE table_name = ?')
+      .run(nextName, nextDescription, table.table_name);
+    return tableDescriptor(db, table.table_name);
   } finally {
     db.close();
   }
