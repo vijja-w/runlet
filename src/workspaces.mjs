@@ -1,8 +1,26 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
+import {
+  addDataRow as addWorkspaceDataRow,
+  addDataColumn as addWorkspaceDataColumn,
+  createDataTable as createWorkspaceDataTable,
+  deleteDataColumn as deleteWorkspaceDataColumn,
+  deleteDataRow as deleteWorkspaceDataRow,
+  deleteInboxTables,
+  ensureInboxTable,
+  ensureWorkspaceDatabase,
+  getDataTable as readWorkspaceDataTable,
+  getDistinctValues,
+  listDataTables as readWorkspaceDataTables,
+  moveDataColumn as moveWorkspaceDataColumn,
+  renameDataColumn as renameWorkspaceDataColumn,
+  updateDataCell as updateWorkspaceDataCell,
+  writeDataRows as writeWorkspaceDataRows,
+} from './database.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stateDir = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet');
@@ -14,10 +32,9 @@ const runHistoryEntryLimit = 64_000;
 const runHistoryWrites = new Map();
 const inboxDefaults = Object.freeze({
   kind: 'inbox',
-  version: 1,
+  version: 2,
   enabled: true,
   instructions: 'INSTRUCTIONS.md',
-  data: 'data.csv',
   processed: 'processed',
   needsReview: 'needs-review',
 });
@@ -133,6 +150,7 @@ export async function createWorkspace({ name, folderPath, create = false }) {
   if (state.workspaces.some((workspace) => workspace.path === resolved)) throw new Error('That folder is already a workspace.');
   await fs.mkdir(path.join(resolved, 'scripts'), { recursive: true });
   await fs.mkdir(path.join(resolved, 'prompts'), { recursive: true });
+  await ensureWorkspaceDatabase(resolved);
   const workspaceFile = path.join(resolved, 'workspace.md');
   if (!(await fs.access(workspaceFile).then(() => true).catch(() => false))) await fs.writeFile(workspaceFile, `# ${workspaceName}\n\nManaged by Runlet.\n`);
   const workspace = { id: uniqueId(), name: workspaceName, path: resolved, createdAt: new Date().toISOString() };
@@ -224,10 +242,11 @@ function normalizeInboxConfig(value) {
   if (!value || value.kind !== 'inbox') return null;
   return {
     kind: 'inbox',
-    version: 1,
+    version: 2,
     enabled: value.enabled !== false,
     instructions: inboxName(value.instructions, inboxDefaults.instructions),
-    data: inboxName(value.data, inboxDefaults.data),
+    table: typeof value.table === 'string' && value.table.trim() ? value.table.trim() : null,
+    legacyData: value.data ? inboxName(value.data, 'data.csv') : null,
     processed: inboxName(value.processed, inboxDefaults.processed),
     needsReview: inboxName(value.needsReview, inboxDefaults.needsReview),
   };
@@ -253,7 +272,16 @@ async function readInboxManifest(directory) {
 
 async function writeInboxManifest(directory, config, { replace = true } = {}) {
   const target = path.join(directory, 'runlet.json');
-  const source = `${JSON.stringify(config, null, 2)}\n`;
+  const stored = {
+    kind: 'inbox',
+    version: 2,
+    enabled: config.enabled !== false,
+    instructions: config.instructions,
+    processed: config.processed,
+    needsReview: config.needsReview,
+    ...(config.table ? { table: config.table } : {}),
+  };
+  const source = `${JSON.stringify(stored, null, 2)}\n`;
   if (!replace) {
     await fs.writeFile(target, source, { flag: 'wx' });
     return;
@@ -281,7 +309,6 @@ async function inboxProtectionReason(workspaceRoot, relativePath) {
 async function inboxIssues(directory, config) {
   const expected = [
     [config.instructions, 'file'],
-    [config.data, 'file'],
     [config.processed, 'directory'],
     [config.needsReview, 'directory'],
   ];
@@ -292,6 +319,30 @@ async function inboxIssues(directory, config) {
     else if (expectedType === 'file' ? !stat.isFile() : !stat.isDirectory()) issues.push({ name, type: 'conflict', reason: `${name} is not a ${expectedType === 'file' ? 'file' : 'folder'}.` });
   }
   return issues;
+}
+
+async function ensureInboxData(workspace, relativePath, directory, config) {
+  const legacyCsvPath = config.legacyData
+    ? path.join(directory, config.legacyData)
+    : null;
+  const hasLegacyCsv = legacyCsvPath ? await fs.stat(legacyCsvPath).then((stat) => stat.isFile()).catch(() => false) : false;
+  const table = await ensureInboxTable(workspace.path, relativePath, {
+    displayName: path.basename(directory),
+    legacyCsvPath: hasLegacyCsv ? legacyCsvPath : undefined,
+    tableName: config.table,
+  });
+  if (hasLegacyCsv) {
+    const backupDirectory = path.join(workspace.path, '.runlet', 'backups');
+    await fs.mkdir(backupDirectory, { recursive: true });
+    const backup = path.join(backupDirectory, `${table.table_name}-data-${Date.now()}.csv`);
+    await fs.rename(legacyCsvPath, backup);
+  }
+  if (config.table !== table.table_name || config.legacyData) {
+    config.table = table.table_name;
+    config.legacyData = null;
+    await writeInboxManifest(directory, config);
+  }
+  return table;
 }
 
 async function describeInboxFolder(workspace, relativePath) {
@@ -309,6 +360,7 @@ async function describeInboxFolder(workspace, relativePath) {
     issues: [],
   };
   const config = manifest.config;
+  const table = await ensureInboxData(workspace, relativePath, directory, config);
   const issues = await inboxIssues(directory, config);
   return {
     canConfigure: true,
@@ -318,20 +370,20 @@ async function describeInboxFolder(workspace, relativePath) {
     status: !config.enabled ? 'off' : issues.length ? 'attention' : 'ready',
     reason: issues[0]?.reason || null,
     issues,
+    table: table.table_name,
+    rowCount: table.rowCount,
     repairable: issues.length > 0 && issues.every((issue) => issue.type === 'missing'),
     instructionsPath: path.join(relativePath, config.instructions),
-    dataPath: path.join(relativePath, config.data),
     processedPath: path.join(relativePath, config.processed),
     needsReviewPath: path.join(relativePath, config.needsReview),
     instructionsAvailable: !issues.some((issue) => issue.name === config.instructions),
-    dataAvailable: !issues.some((issue) => issue.name === config.data),
+    dataAvailable: true,
   };
 }
 
 async function ensureInboxArtifacts(directory, config) {
   const artifacts = [
-    [config.instructions, 'file', '# Inbox instructions\n\nDescribe what Runlet should extract from each file and how the results should be recorded.\n'],
-    [config.data, 'file', 'source_file\n'],
+    [config.instructions, 'file', '# Inbox instructions\n\nDescribe what Runlet should extract from each file and how each row should be recorded in this Inbox’s data table.\n'],
     [config.processed, 'directory'],
     [config.needsReview, 'directory'],
   ];
@@ -415,6 +467,9 @@ async function hydrateControls(workspacePath, controls = []) {
       const columnIndex = rows[0]?.indexOf(control.source.column) ?? -1;
       if (columnIndex < 0) throw new Error(`Column “${control.source.column}” was not found in ${control.source.path}.`);
       hydrated.options = [...new Set(rows.slice(1).map((row) => row[columnIndex]).filter(Boolean))];
+    }
+    if (control.type === 'select' && control.source?.type === 'table-column') {
+      hydrated.options = await getDistinctValues(workspacePath, control.source.table, control.source.column);
     }
     hydrated.options = Array.isArray(hydrated.options) ? hydrated.options.map(String) : [];
     return hydrated;
@@ -507,7 +562,7 @@ export function getActionTemplate(kind = 'script', withView = false) {
   return {
     kind,
     ...shared,
-    runJsGuidance: 'run.js must export one default async function receiving { workspace, run, pdf, csv, zip, xlsx, docx }. Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log. Do not import modules or access paths outside the registered workspace.',
+    runJsGuidance: 'run.js must export one default async function receiving { workspace, run, data, pdf, csv, zip, xlsx, docx }. Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, data.listTables/read/insert/upsert, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log. Do not import modules or access paths outside the registered workspace.',
   };
 }
 
@@ -554,10 +609,10 @@ export function getScriptTemplate(withView = false) {
       'Use a lower-case kebab-case folder name beneath scripts/.',
       'Store the editable display name, description, controls, and result panels in runlet.json.',
       'Treat README.md as the plain-language user interface.',
-      'run.js receives { workspace, run, input, pdf, csv, zip, xlsx, docx }. Use input values declared by the controls.',
-      'Controls may be text, number, or select. A select may load unique values from a workspace CSV column.',
+      'run.js receives { workspace, run, input, data, pdf, csv, zip, xlsx, docx }. Use input values declared by the controls.',
+      'Controls may be text, number, or select. A select may load unique values from a workspace data-table column.',
       'Results may display an outputs/ text file as a summary or an outputs/ CSV file as a table.',
-      'Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log.',
+      'Use only workspace.read/readBytes/write/writeBytes/list/exists/mkdir/delete/fetch, data.listTables/read/insert/upsert, pdf.extractText, csv.parse/stringify, zip.extract/create, xlsx.read/create, docx.extractText, and run.log.',
       'Write every generated file beneath this Script’s outputs/ directory.',
       'Runlet generates the normal interactive interface. Add index.html only for a specialized dashboard.',
     ],
@@ -565,7 +620,7 @@ export function getScriptTemplate(withView = false) {
       name: 'Current Recipe Cost',
       description: 'Calculate a recipe using the latest invoice prices.',
       interface: {
-        controls: [{ name: 'recipe', label: 'Recipe', type: 'select', required: true, source: { type: 'csv-column', path: 'recipes.csv', column: 'recipe' } }],
+        controls: [{ name: 'recipe', label: 'Recipe', type: 'select', required: true, source: { type: 'table-column', table: 'recipes', column: 'recipe' } }],
         results: [{ type: 'summary', label: 'Summary', path: 'outputs/summary.txt' }, { type: 'table', label: 'Details', path: 'outputs/results.csv' }],
       },
     },
@@ -927,13 +982,19 @@ export async function setupInbox(workspaceId, relativePath, { repair = false } =
     const issues = await inboxIssues(directory, manifest.config);
     if (issues.length && !repair) throw new Error(`Inbox needs attention: ${issues.map((issue) => issue.reason).join(' ')}`);
     if (repair) await ensureInboxArtifacts(directory, manifest.config);
-    await writeInboxManifest(directory, { ...manifest.config, enabled: true });
+    manifest.config.enabled = true;
+    await ensureInboxData(workspace, relativePath, directory, manifest.config);
+    await writeInboxManifest(directory, manifest.config);
     return describeInboxFolder(workspace, relativePath);
   }
 
   const config = { ...inboxDefaults };
   const created = await ensureInboxArtifacts(directory, config);
-  try { await writeInboxManifest(directory, config, { replace: false }); }
+  try {
+    const table = await ensureInboxTable(workspace.path, relativePath, { displayName: path.basename(directory) });
+    config.table = table.table_name;
+    await writeInboxManifest(directory, config, { replace: false });
+  }
   catch (error) {
     await Promise.all(created.reverse().map((target) => fs.rm(target, { recursive: true, force: true })));
     throw error?.code === 'EEXIST' ? new Error('runlet.json was created by another action. Refresh and try again.') : error;
@@ -947,12 +1008,14 @@ export async function setInboxEnabled(workspaceId, relativePath, enabled) {
   const directory = resolveInside(workspace.path, relativePath);
   const manifest = await readInboxManifest(directory);
   if (!manifest.config) throw new Error('This folder is not an Inbox.');
-  await writeInboxManifest(directory, { ...manifest.config, enabled: false });
+  await ensureInboxData(workspace, relativePath, directory, manifest.config);
+  manifest.config.enabled = false;
+  await writeInboxManifest(directory, manifest.config);
   return describeInboxFolder(workspace, relativePath);
 }
 
 async function inboxPendingFiles(directory, config) {
-  const reserved = new Set(['runlet.json', config.instructions, config.data]);
+  const reserved = new Set(['runlet.json', config.instructions, config.legacyData].filter(Boolean));
   const entries = await fs.readdir(directory, { withFileTypes: true });
   return entries.filter((entry) => entry.isFile() && !entry.name.startsWith('.') && !reserved.has(entry.name)).map((entry) => entry.name).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
 }
@@ -978,7 +1041,8 @@ export async function getInbox(workspaceId, relativePath) {
     issues: description.issues,
     instructionsPath: description.instructionsPath,
     instructions,
-    dataPath: description.dataPath,
+    table: description.table,
+    rowCount: description.rowCount,
     processedPath: description.processedPath,
     needsReviewPath: description.needsReviewPath,
     pendingFiles: await inboxPendingFiles(directory, manifest.config),
@@ -1024,7 +1088,8 @@ export async function listInboxes(workspaceId, { includeDisabled = false } = {})
             reason: description.reason,
             issues: description.issues,
             instructionsPath: description.instructionsPath,
-            dataPath: description.dataPath,
+            table: description.table,
+            rowCount: description.rowCount,
             processedPath: description.processedPath,
             needsReviewPath: description.needsReviewPath,
             pendingFiles: await inboxPendingFiles(childDirectory, manifest.config),
@@ -1037,6 +1102,63 @@ export async function listInboxes(workspaceId, { includeDisabled = false } = {})
   }
   await walk();
   return inboxes.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export async function listDataTables(workspaceId) {
+  const workspace = await getWorkspace(workspaceId);
+  await listInboxes(workspace.id, { includeDisabled: true });
+  return readWorkspaceDataTables(workspace.path);
+}
+
+export async function createDataTable(workspaceId, name) {
+  const workspace = await getWorkspace(workspaceId);
+  return createWorkspaceDataTable(workspace.path, name);
+}
+
+export async function getDataTable(workspaceId, table, options = {}) {
+  const workspace = await getWorkspace(workspaceId);
+  await listInboxes(workspace.id, { includeDisabled: true });
+  return readWorkspaceDataTable(workspace.path, table, options);
+}
+
+export async function updateDataCell(workspaceId, table, rowId, column, value) {
+  const workspace = await getWorkspace(workspaceId);
+  return updateWorkspaceDataCell(workspace.path, table, rowId, column, value);
+}
+
+export async function addDataRow(workspaceId, table, values = {}) {
+  const workspace = await getWorkspace(workspaceId);
+  return addWorkspaceDataRow(workspace.path, table, values);
+}
+
+export async function addDataColumn(workspaceId, table, name) {
+  const workspace = await getWorkspace(workspaceId);
+  return addWorkspaceDataColumn(workspace.path, table, name);
+}
+
+export async function renameDataColumn(workspaceId, table, column, name) {
+  const workspace = await getWorkspace(workspaceId);
+  return renameWorkspaceDataColumn(workspace.path, table, column, name);
+}
+
+export async function deleteDataColumn(workspaceId, table, column) {
+  const workspace = await getWorkspace(workspaceId);
+  return deleteWorkspaceDataColumn(workspace.path, table, column);
+}
+
+export async function moveDataColumn(workspaceId, table, column, direction) {
+  const workspace = await getWorkspace(workspaceId);
+  return moveWorkspaceDataColumn(workspace.path, table, column, direction);
+}
+
+export async function deleteDataRow(workspaceId, table, rowId) {
+  const workspace = await getWorkspace(workspaceId);
+  return deleteWorkspaceDataRow(workspace.path, table, rowId);
+}
+
+export async function writeDataRows(workspaceId, table, rows, keyColumns = []) {
+  const workspace = await getWorkspace(workspaceId);
+  return writeWorkspaceDataRows(workspace.path, table, rows, { keyColumns });
 }
 
 export async function listFiles(workspaceId, relativePath = '.') {
@@ -1079,7 +1201,46 @@ export async function moveFile(workspaceId, from, to) {
   await fs.rename(source, target);
   return { path: to };
 }
-export async function deleteFile(workspaceId, relativePath) { const workspace = await getWorkspace(workspaceId); const target = resolveInside(workspace.path, relativePath); if (target === path.resolve(workspace.path)) throw new Error('Cannot delete a workspace root.'); await fs.rm(target, { recursive: true }); }
+export async function copyFile(workspaceId, from, to) {
+  const workspace = await getWorkspace(workspaceId);
+  const source = resolveInside(workspace.path, from);
+  const target = resolveInside(workspace.path, to);
+  if (source === path.resolve(workspace.path)) throw new Error('The workspace folder cannot be copied.');
+  const sourceStat = await fs.stat(source).catch(() => null);
+  if (!sourceStat) throw new Error('That file no longer exists.');
+  if (!sourceStat.isFile()) throw new Error('Drag individual files to copy them.');
+  if (target === source || target.startsWith(`${source}${path.sep}`)) throw new Error('A folder cannot be copied into itself.');
+  if (await fs.access(target).then(() => true).catch(() => false)) throw new Error('A file or folder with that name already exists there.');
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.copyFile(source, target, fsConstants.COPYFILE_EXCL);
+  return { path: to };
+}
+
+export async function uploadFiles(workspaceId, relativeFolder, files) {
+  const workspace = await getWorkspace(workspaceId);
+  const directory = resolveInside(workspace.path, relativeFolder || '.');
+  const stat = await fs.stat(directory).catch(() => null);
+  if (!stat?.isDirectory()) throw new Error('Drop files into a folder.');
+  if (!Array.isArray(files) || !files.length) throw new Error('No files were dropped.');
+  const prepared = files.map((file) => {
+    const name = String(file?.name || '');
+    if (!name || name === '.' || name === '..' || name !== path.basename(name) || /[\\/]/.test(name)) throw new Error('A dropped file has an invalid name.');
+    const target = resolveInside(directory, name);
+    const bytes = Buffer.isBuffer(file.data) ? file.data : Buffer.from(file.data || []);
+    return { name, target, bytes };
+  });
+  if (new Set(prepared.map((file) => file.name.toLowerCase())).size !== prepared.length) throw new Error('Two dropped files have the same name.');
+  for (const file of prepared) if (await fs.access(file.target).then(() => true).catch(() => false)) throw new Error(`${file.name} already exists in that folder.`);
+  await Promise.all(prepared.map((file) => fs.writeFile(file.target, file.bytes, { flag: 'wx' })));
+  return { copied: prepared.map((file) => file.name), folder: relativeFolder || '.' };
+}
+export async function deleteFile(workspaceId, relativePath) {
+  const workspace = await getWorkspace(workspaceId);
+  const target = resolveInside(workspace.path, relativePath);
+  if (target === path.resolve(workspace.path)) throw new Error('Cannot delete a workspace root.');
+  await fs.rm(target, { recursive: true });
+  await deleteInboxTables(workspace.path, path.relative(workspace.path, target));
+}
 
 export async function listDirectories(folderPath = os.homedir()) {
   const resolved = path.resolve(String(folderPath).replace(/^~(?=$|\/)/, os.homedir()));

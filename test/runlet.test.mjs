@@ -55,6 +55,7 @@ test('creates a workspace with separate Scripts and Prompts folders', async () =
   assert.equal((await runlet.getCurrentWorkspace()).id, workspace.id);
   assert.equal((await fs.stat(path.join(workspace.path, 'scripts'))).isDirectory(), true);
   assert.equal((await fs.stat(path.join(workspace.path, 'prompts'))).isDirectory(), true);
+  assert.ok((await fs.stat(path.join(workspace.path, '.runlet', 'workspace.sqlite'))).isFile());
 });
 
 test('creates folders and safely moves files within a workspace', async () => {
@@ -66,6 +67,11 @@ test('creates folders and safely moves files within a workspace', async () => {
   await assert.rejects(runlet.makeDirectory(current.id, 'Documents'), /already exists/i);
   await assert.rejects(runlet.moveFile(current.id, 'Documents', 'Documents/Archive/Documents'), /into itself/i);
   await assert.rejects(runlet.moveFile(current.id, 'Documents/note.txt', 'Documents/note.txt'), /into itself/i);
+  await runlet.copyFile(current.id, 'Documents/note.txt', 'note-copy.txt');
+  assert.equal(await runlet.readFile(current.id, 'note-copy.txt'), 'hello');
+  await runlet.uploadFiles(current.id, 'Documents', [{ name: 'dropped.txt', data: Buffer.from('copied') }]);
+  assert.equal(await runlet.readFile(current.id, 'Documents/dropped.txt'), 'copied');
+  await runlet.deleteFile(current.id, 'note-copy.txt');
   await runlet.deleteFile(current.id, 'Documents');
 });
 
@@ -77,8 +83,36 @@ test('configures, pauses, repairs, and discovers Inboxes safely', async () => {
   const ready = await runlet.setupInbox(current.id, 'Invoices');
   assert.equal(ready.status, 'ready');
   assert.equal(ready.enabled, true);
-  assert.equal(JSON.parse(await runlet.readFile(current.id, 'Invoices/runlet.json')).kind, 'inbox');
-  assert.equal(await runlet.readFile(current.id, 'Invoices/data.csv'), 'source_file\n');
+  const inboxConfig = JSON.parse(await runlet.readFile(current.id, 'Invoices/runlet.json'));
+  assert.equal(inboxConfig.kind, 'inbox');
+  assert.equal(inboxConfig.version, 2);
+  assert.equal(inboxConfig.data, undefined);
+  assert.equal(typeof inboxConfig.table, 'string');
+  assert.deepEqual((await runlet.getDataTable(current.id, inboxConfig.table)).columns, [{ name: 'source_file', type: 'TEXT' }]);
+  assert.deepEqual((await runlet.listDataTables(current.id)).map((table) => table.display_name), ['Invoices']);
+
+  await runlet.writeDataRows(current.id, inboxConfig.table, [
+    { source_file: 'invoice-1.txt', vendor: 'Bakery Supply', total: 12.5 },
+  ], ['source_file']);
+  await runlet.writeDataRows(current.id, inboxConfig.table, [
+    { source_file: 'invoice-1.txt', vendor: 'Bakery Supply', total: 13.25 },
+  ], ['source_file']);
+  let data = await runlet.getDataTable(current.id, inboxConfig.table);
+  assert.equal(data.rowCount, 1);
+  assert.equal(data.rows[0].values.total, 13.25);
+  await runlet.updateDataCell(current.id, inboxConfig.table, data.rows[0].id, 'vendor', 'New Supplier');
+  assert.equal((await runlet.getDataTable(current.id, inboxConfig.table)).rows[0].values.vendor, 'New Supplier');
+  const added = await runlet.addDataRow(current.id, inboxConfig.table, { source_file: 'manual' });
+  await runlet.deleteDataRow(current.id, inboxConfig.table, added.rowId);
+  assert.equal((await runlet.getDataTable(current.id, inboxConfig.table)).rowCount, 1);
+  await runlet.addDataColumn(current.id, inboxConfig.table, 'notes');
+  await runlet.moveDataColumn(current.id, inboxConfig.table, 'notes', 'left');
+  assert.deepEqual((await runlet.getDataTable(current.id, inboxConfig.table)).columns.map((column) => column.name), ['source_file', 'vendor', 'notes', 'total']);
+  await runlet.renameDataColumn(current.id, inboxConfig.table, 'notes', 'comments');
+  assert.deepEqual((await runlet.getDataTable(current.id, inboxConfig.table)).columns.map((column) => column.name), ['source_file', 'vendor', 'comments', 'total']);
+  await assert.rejects(runlet.renameDataColumn(current.id, inboxConfig.table, 'comments', 'vendor'), /already exists/i);
+  await runlet.deleteDataColumn(current.id, inboxConfig.table, 'comments');
+  assert.deepEqual((await runlet.getDataTable(current.id, inboxConfig.table)).columns.map((column) => column.name), ['source_file', 'vendor', 'total']);
   await runlet.makeDirectory(current.id, 'Invoices/processed/not-an-inbox');
   await runlet.writeFile(current.id, 'Invoices/processed/not-an-inbox/runlet.json', JSON.stringify({ kind: 'inbox' }));
 
@@ -90,13 +124,14 @@ test('configures, pauses, repairs, and discovers Inboxes safely', async () => {
 
   const inbox = await runlet.getInbox(current.id, 'Invoices');
   assert.match(inbox.instructions, /Inbox instructions/);
+  assert.equal(inbox.table, inboxConfig.table);
   const updated = await runlet.updateInboxInstructions(current.id, 'Invoices', '# Invoice instructions\n\nExtract the total.\n');
   assert.equal(updated.instructions, '# Invoice instructions\n\nExtract the total.\n');
   assert.equal(await runlet.readFile(current.id, 'Invoices/INSTRUCTIONS.md'), updated.instructions);
   await assert.rejects(runlet.getInbox(current.id, 'not-an-inbox'), /not found/i);
   await assert.rejects(runlet.updateInboxInstructions(current.id, 'scripts', '# No'), /not an Inbox/i);
 
-  await runlet.deleteFile(current.id, 'Invoices/data.csv');
+  await runlet.deleteFile(current.id, 'Invoices/INSTRUCTIONS.md');
   const listed = (await runlet.listFiles(current.id)).find((item) => item.name === 'Invoices');
   assert.equal(listed.inbox.status, 'attention');
   assert.equal(listed.inbox.repairable, true);
@@ -111,6 +146,51 @@ test('configures, pauses, repairs, and discovers Inboxes safely', async () => {
   await assert.rejects(runlet.setupInbox(current.id, 'scripts'), /Scripts and Prompts/i);
   await assert.rejects(runlet.setupInbox(current.id, 'Invoices/processed'), /result folders/i);
   await runlet.deleteFile(current.id, 'Invoices');
+  assert.deepEqual(await runlet.listDataTables(current.id), []);
+  await assert.rejects(runlet.getDataTable(current.id, inboxConfig.table), /not found/i);
+});
+
+test('creates standalone workspace Tables', async () => {
+  const current = await runlet.getCurrentWorkspace();
+  const created = await runlet.createDataTable(current.id, 'Suppliers');
+  assert.equal(created.display_name, 'Suppliers');
+  assert.equal(created.source_kind, 'table');
+  assert.equal(created.inbox_path, `.runlet/tables/${created.table_name}`);
+  assert.deepEqual(created.columns, [{ name: 'Column 1', type: 'TEXT' }]);
+  const row = await runlet.addDataRow(current.id, created.table_name, { 'Column 1': 'Golden Grain' });
+  assert.equal(row.rowId, 1);
+  assert.equal((await runlet.getDataTable(current.id, created.table_name)).rows[0].values['Column 1'], 'Golden Grain');
+  await runlet.renameDataColumn(current.id, created.table_name, 'Column 1', 'Supplier');
+  assert.equal((await runlet.getDataTable(current.id, created.table_name)).rows[0].values.Supplier, 'Golden Grain');
+  await assert.rejects(runlet.createDataTable(current.id, 'suppliers'), /already exists/i);
+});
+
+test('migrates legacy Inbox CSV data into its workspace database', async () => {
+  const previous = await runlet.getCurrentWorkspace();
+  const folder = path.join(temporaryRoot, 'legacy-workspace');
+  const legacy = await runlet.createWorkspace({ name: 'Legacy workspace', folderPath: folder, create: true });
+  await fs.mkdir(path.join(folder, 'Orders', 'processed'), { recursive: true });
+  await fs.mkdir(path.join(folder, 'Orders', 'needs-review'), { recursive: true });
+  await fs.writeFile(path.join(folder, 'Orders', 'INSTRUCTIONS.md'), '# Orders\n');
+  await fs.writeFile(path.join(folder, 'Orders', 'data.csv'), 'source_file,item,price\norder-1.csv,Bread,4.25\n');
+  await fs.writeFile(path.join(folder, 'Orders', 'runlet.json'), JSON.stringify({
+    kind: 'inbox', version: 1, enabled: true, instructions: 'INSTRUCTIONS.md', data: 'data.csv', processed: 'processed', needsReview: 'needs-review',
+  }));
+
+  const inbox = (await runlet.listInboxes(legacy.id))[0];
+  assert.equal(inbox.rowCount, 1);
+  const data = await runlet.getDataTable(legacy.id, inbox.table);
+  assert.equal(data.rows[0].values.item, 'Bread');
+  assert.equal(data.rows[0].values.price, 4.25);
+  await assert.rejects(fs.access(path.join(folder, 'Orders', 'data.csv')));
+  assert.ok((await fs.readdir(path.join(folder, '.runlet', 'backups'))).some((name) => name.startsWith(`${inbox.table}-data-`)));
+  const config = JSON.parse(await fs.readFile(path.join(folder, 'Orders', 'runlet.json'), 'utf8'));
+  assert.equal(config.version, 2);
+  assert.equal(config.table, inbox.table);
+  assert.equal(config.data, undefined);
+
+  await runlet.removeWorkspace(legacy.id);
+  await runlet.selectWorkspace(previous.id);
 });
 
 test('requires unique workspace names and renames without deleting folders', async () => {
@@ -132,26 +212,30 @@ test('requires unique workspace names and renames without deleting folders', asy
 
 test('creates and runs a Script', async () => {
   const current = await runlet.getCurrentWorkspace();
-  await runlet.writeFile(current.id, 'recipes.csv', 'recipe\nSourdough\nBaguette\nSourdough\n');
+  await runlet.makeDirectory(current.id, 'Recipes');
+  const recipeInbox = await runlet.setupInbox(current.id, 'Recipes');
+  await runlet.writeDataRows(current.id, recipeInbox.table, [{ recipe: 'Sourdough' }, { recipe: 'Baguette' }, { recipe: 'Sourdough' }]);
   await runlet.createScript({
     workspaceId: current.id,
     slug: 'copy-text',
     name: 'Recipe Message',
     description: 'Write a message for one recipe.',
     controls: [
-      { name: 'recipe', label: 'Recipe', type: 'select', required: true, source: { type: 'csv-column', path: 'recipes.csv', column: 'recipe' } },
+      { name: 'recipe', label: 'Recipe', type: 'select', required: true, source: { type: 'table-column', table: recipeInbox.table, column: 'recipe' } },
       { name: 'message', label: 'Message', type: 'text', required: true },
     ],
     results: [{ type: 'summary', label: 'Result', path: 'outputs/result.txt' }],
     readme: '# Copy Text\n\nCopy one input into an output.\n',
-    runJs: `export default async function ({ workspace, run, input }) {
+    runJs: `export default async function ({ workspace, run, input, data }) {
+      const recipes = await data.read('${recipeInbox.table}');
+      if (!recipes.some((row) => row.recipe === input.recipe)) throw new Error('Recipe not found.');
       await workspace.write('scripts/copy-text/outputs/result.txt', input.recipe + ': ' + input.message.toUpperCase());
       run.log('Created message.');
       if (input.message === 'fail') throw new Error('Deliberate failure.');
     }`,
   });
   const listed = await runlet.getScript(current.id, 'copy-text');
-  assert.deepEqual(listed.controls[0].options, ['Sourdough', 'Baguette']);
+  assert.deepEqual(listed.controls[0].options, ['Baguette', 'Sourdough']);
   const result = await runlet.runScript(current.id, 'copy-text', { recipe: 'Sourdough', message: 'hello' });
   assert.equal(result.ok, true);
   assert.deepEqual(result.logs, ['Created message.']);
@@ -192,6 +276,7 @@ test('creates and runs a Script', async () => {
   assert.equal(deleted.deleted.name, 'Recipe Note');
   await assert.rejects(runlet.getScript(current.id, 'copy-text'), /Script not found/);
   await assert.rejects(fs.access(path.join(current.path, 'scripts/copy-text')));
+  await runlet.deleteFile(current.id, 'Recipes');
 });
 
 test('Scripts can extract PDF text and use bundled CSV and ZIP helpers', async () => {

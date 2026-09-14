@@ -1,6 +1,6 @@
 # Runlet
 
-Runlet keeps ordinary files, processing Inboxes, small local Scripts, and reusable AI Prompts together in simple workspaces.
+Runlet keeps ordinary files, spreadsheet-like Inbox data, small local Scripts, and reusable AI Prompts together in simple workspaces.
 
 ## Install
 

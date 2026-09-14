@@ -9,11 +9,11 @@ const instructions = `Runlet manages explicitly registered local workspaces, Scr
 
 Before reading or changing files, identify the intended workspace. Call get_current_workspace when the user refers to the active workspace. Call list_workspaces when it is ambiguous. If the user names a workspace, select it and pass its workspaceId to every later operation. Never modify an unregistered folder.
 
-Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.json, README.md, run.js, inputs/, and outputs/. runlet.json declares its editable name, description, interactive controls, and result panels. Runlet generates the normal interface; index.html is optional for a specialized dashboard. When asked to create a Script, call get_script_template and then create_script. run.js receives { workspace, run, input, pdf, csv, zip, xlsx, docx } and may use only the provided APIs. Binary files use workspace.readBytes and workspace.writeBytes. Run Scripts with run_script and inspect their outputs. If a run fails, call get_script_run_history to inspect its final error and run.log messages.
+Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.json, README.md, run.js, inputs/, and outputs/. runlet.json declares its editable name, description, interactive controls, and result panels. Runlet generates the normal interface; index.html is optional for a specialized dashboard. When asked to create a Script, call get_script_template and then create_script. run.js receives { workspace, run, input, data, pdf, csv, zip, xlsx, docx } and may use only the provided APIs. Use data.read/insert/upsert for workspace tables. Binary files use workspace.readBytes and workspace.writeBytes. Run Scripts with run_script and inspect their outputs. If a run fails, call get_script_run_history to inspect its final error and run.log messages.
 
 Prompts are reusable AI instructions under prompts/<kebab-case-slug>/PROMPT.md. They are not programs and do not launch a second AI. When asked to create a Prompt, call get_prompt_template and then create_prompt. When asked to use a Prompt, call get_prompt and follow its content using files attached to the conversation or explicitly named workspace files. The user can also copy a Prompt from Runlet and paste it into any compatible AI.
 
-Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, data.csv, processed/, and needs-review/. Loose files in an Inbox root are waiting to be processed. Always call list_inboxes instead of scanning for instruction files, then call get_inbox to read the instructions for an Inbox before processing it. Process only enabled, ready Inboxes; leave an Inbox untouched when it needs attention. For each ready Inbox, follow its instructions, update its data file, move successful source files to its processed folder, and move genuinely ambiguous files to its needs-review folder.`;
+Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, processed/, and needs-review/. Each Inbox owns a table in the workspace database. Loose files in an Inbox root are waiting to be processed. Always call list_inboxes instead of scanning for instruction files, then call get_inbox to read the instructions and table name before processing it. Process only enabled, ready Inboxes; leave an Inbox untouched when it needs attention. For each ready Inbox, follow its instructions, write rows with write_data_rows, move successful source files to its processed folder, and move genuinely ambiguous files to its needs-review folder. Use source_file plus source_row as keys when the instructions call for idempotent line-item processing. When the user asks to edit an Inbox table, use the Data tools to inspect and make the requested cell, row, or column changes.`;
 
 const server = new McpServer({ name: 'runlet', version: '0.18.0' }, { instructions });
 const textResult = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -29,7 +29,10 @@ const scriptControl = z.object({
   required: z.boolean().optional(),
   default: z.union([z.string(), z.number()]).optional(),
   options: z.array(z.string()).optional(),
-  source: z.object({ type: z.literal('csv-column'), path: z.string(), column: z.string() }).optional(),
+  source: z.union([
+    z.object({ type: z.literal('table-column'), table: z.string(), column: z.string() }),
+    z.object({ type: z.literal('csv-column'), path: z.string(), column: z.string() }),
+  ]).optional(),
 });
 const scriptResult = z.object({
   type: z.enum(['summary', 'text', 'table']),
@@ -94,6 +97,61 @@ server.registerTool('update_inbox_instructions', {
     content: z.string().describe('Complete Markdown content for the Inbox instructions.'),
   }),
 }, async ({ workspaceId: id, path: target, content }) => textResult(await runlet.updateInboxInstructions(id, target, content)));
+
+server.registerTool('list_data_tables', {
+  description: mcpToolDescriptions.list_data_tables,
+  inputSchema: z.object({ workspaceId }),
+}, async ({ workspaceId: id }) => textResult(await runlet.listDataTables(id)));
+
+server.registerTool('create_data_table', {
+  description: mcpToolDescriptions.create_data_table,
+  inputSchema: z.object({ workspaceId, name: z.string().min(1) }),
+}, async ({ workspaceId: id, name }) => textResult(await runlet.createDataTable(id, name)));
+
+server.registerTool('get_data_table', {
+  description: mcpToolDescriptions.get_data_table,
+  inputSchema: z.object({ workspaceId, table: z.string(), limit: z.number().int().min(1).max(5000).default(1000), offset: z.number().int().min(0).default(0) }),
+}, async ({ workspaceId: id, table, limit, offset }) => textResult(await runlet.getDataTable(id, table, { limit, offset })));
+
+server.registerTool('write_data_rows', {
+  description: mcpToolDescriptions.write_data_rows,
+  inputSchema: z.object({
+    workspaceId,
+    table: z.string(),
+    rows: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+    keyColumns: z.array(z.string()).default([]),
+  }),
+}, async ({ workspaceId: id, table, rows, keyColumns }) => textResult(await runlet.writeDataRows(id, table, rows, keyColumns)));
+
+server.registerTool('update_data_cell', {
+  description: mcpToolDescriptions.update_data_cell,
+  inputSchema: z.object({ workspaceId, table: z.string(), rowId: z.number().int().positive(), column: z.string(), value: z.union([z.string(), z.number(), z.boolean(), z.null()]) }),
+}, async ({ workspaceId: id, table, rowId, column, value }) => textResult(await runlet.updateDataCell(id, table, rowId, column, value)));
+
+server.registerTool('delete_data_row', {
+  description: mcpToolDescriptions.delete_data_row,
+  inputSchema: z.object({ workspaceId, table: z.string(), rowId: z.number().int().positive() }),
+}, async ({ workspaceId: id, table, rowId }) => textResult(await runlet.deleteDataRow(id, table, rowId)));
+
+server.registerTool('add_data_column', {
+  description: mcpToolDescriptions.add_data_column,
+  inputSchema: z.object({ workspaceId, table: z.string(), name: z.string().min(1) }),
+}, async ({ workspaceId: id, table, name }) => textResult(await runlet.addDataColumn(id, table, name)));
+
+server.registerTool('rename_data_column', {
+  description: mcpToolDescriptions.rename_data_column,
+  inputSchema: z.object({ workspaceId, table: z.string(), column: z.string(), name: z.string().min(1) }),
+}, async ({ workspaceId: id, table, column, name }) => textResult(await runlet.renameDataColumn(id, table, column, name)));
+
+server.registerTool('delete_data_column', {
+  description: mcpToolDescriptions.delete_data_column,
+  inputSchema: z.object({ workspaceId, table: z.string(), column: z.string() }),
+}, async ({ workspaceId: id, table, column }) => textResult(await runlet.deleteDataColumn(id, table, column)));
+
+server.registerTool('move_data_column', {
+  description: mcpToolDescriptions.move_data_column,
+  inputSchema: z.object({ workspaceId, table: z.string(), column: z.string(), direction: z.enum(['left', 'right']) }),
+}, async ({ workspaceId: id, table, column, direction }) => textResult(await runlet.moveDataColumn(id, table, column, direction)));
 
 server.registerTool('read_file', {
   description: mcpToolDescriptions.read_file,

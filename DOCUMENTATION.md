@@ -62,7 +62,7 @@ prompts/
     └── PROMPT.md
 ```
 
-The Files area lets someone intentionally inspect workspace files, move them between folders, and enable ordinary folders as Inboxes. Script and Prompt pages keep paths and implementation details out of the normal workflow.
+The Files area lets someone intentionally inspect workspace files and enable ordinary folders as Inboxes. Files can be dragged from the computer or from another Runlet folder onto a folder to copy them there; the original stays where it is. Script and Prompt pages keep paths and implementation details out of the normal workflow.
 
 ## Inboxes
 
@@ -71,12 +71,17 @@ An Inbox is an explicitly enabled folder whose loose files are waiting for a con
 ```text
 runlet.json
 INSTRUCTIONS.md
-data.csv
 processed/
 needs-review/
 ```
 
-`runlet.json` identifies the folder as an Inbox. `INSTRUCTIONS.md` tells the AI what to do, and `data.csv` stores extracted records. Successful source files belong in `processed/`; files requiring human judgment belong in `needs-review/`.
+`runlet.json` identifies the folder as an Inbox. `INSTRUCTIONS.md` tells the AI what to do. The Inbox's extracted records live in a table in the workspace database. Successful source files belong in `processed/`; files requiring human judgment belong in `needs-review/`.
+
+The **Inbox Data** area first shows a familiar list of Inboxes. Open one to see its spreadsheet. You can edit cells, sort or search rows, add and remove rows or columns, move columns, and paste a block copied from Excel or CSV. Column types remain an internal detail for now. Runlet stores the tables together in a private SQLite database under `.runlet/`; that implementation detail stays out of the normal interface.
+
+The separate **Tables** area uses the same spreadsheet interface for information someone creates themselves rather than information extracted by an Inbox. New Tables begin with one editable column, and rows and columns can be added from the table view or through a connected AI using Runlet. A column can be renamed, moved, or deleted from its three-dot menu.
+
+When an older Inbox is opened for the first time, Runlet imports its `data.csv` into the table and moves the original file into a hidden backup folder. Deleting an Inbox folder also deletes its table. Removing the workspace from Runlet never deletes the workspace folder or its database.
 
 Turning an Inbox off preserves all of its files but removes it from normal AI processing. If a required item is deleted, the Inbox remains enabled but pauses with a warning until it is repaired. Runlet's own `scripts/` and `prompts/` areas cannot become Inboxes.
 
@@ -84,7 +89,7 @@ Turning an Inbox off preserves all of its files but removes it from normal AI pr
 
 Runlet connects to compatible AI apps through MCP. It provides tools for registered workspaces, files and Inboxes, Scripts, and Prompts. The AI can only access folders that have been explicitly registered as Runlet workspaces.
 
-For Inboxes, the AI uses `list_inboxes` to discover enabled work, `get_inbox` to read one Inbox and its instructions, and `update_inbox_instructions` when you ask it to change those instructions. Processing still uses the ordinary file tools to update `data.csv` and move source files, keeping the interface small and consistent.
+For Inboxes, the AI uses `list_inboxes` to discover enabled work, `get_inbox` to read one Inbox and its instructions, and the Data tools to inspect or modify cells, rows, and columns. The ordinary file tools move completed source files. This is what makes requests such as “Use Runlet to modify the invoices table” work without asking the user to manage the database directly.
 
 To see the complete current list with a description of each tool, run:
 
@@ -98,11 +103,11 @@ This list is generated from the same descriptions used by Runlet's MCP server, s
 
 A Script is a small local app. `runlet.json` defines its editable name, description, controls, and result panels. Runlet generates the normal Run page from that information.
 
-Controls may be text fields, numbers, or dropdowns. A dropdown can load unique options from a CSV column in the workspace. Results may show an `outputs/` text file as a summary or an `outputs/` CSV file as a table.
+Controls may be text fields, numbers, or dropdowns. A dropdown can load unique options from a workspace table column. Results may show an `outputs/` text file as a summary or an `outputs/` CSV file as a table.
 
 A specialized Script may include `index.html`. After the Script runs, that page opens in a separate browser tab. **Previous run** reopens it without running the Script again.
 
-Script JavaScript runs locally in an isolated worker and receives only Runlet's built-in APIs, including helpers for PDF, CSV, ZIP, Excel `.xlsx`, and Word `.docx` files. See [Script JavaScript API and bundled libraries](SCRIPTING.md), or run:
+Script JavaScript runs locally in an isolated worker and receives only Runlet's built-in APIs, including workspace table access and helpers for PDF, CSV, ZIP, Excel `.xlsx`, and Word `.docx` files. See [Script JavaScript API and bundled libraries](SCRIPTING.md), or run:
 
 ```bash
 runlet libraries

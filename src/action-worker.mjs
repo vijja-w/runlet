@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { stringify as stringifyCsv } from 'csv-stringify/sync';
 import { unzipSync, zipSync, strToU8 } from 'fflate';
+import { createScriptDataApi } from './database.mjs';
 
 const logs = [];
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -165,7 +166,8 @@ try {
   const context = vm.createContext({ console: Object.freeze({ log: (...values) => logs.push(values.join(' ')) }), setTimeout, clearTimeout, TextEncoder, TextDecoder, URL }, { codeGeneration: { strings: false, wasm: false } });
   const action = new vm.Script(transformed, { filename: 'run.js' }).runInContext(context, { timeout: 1_000 });
   if (typeof action !== 'function') throw new Error('The default export in run.js must be a function.');
-  await action({ workspace, run, input: Object.freeze({ ...(workerData.input || {}) }), pdf, csv, zip, xlsx, docx });
+  const data = createScriptDataApi(workerData.workspacePath);
+  await action({ workspace, run, input: Object.freeze({ ...(workerData.input || {}) }), data, pdf, csv, zip, xlsx, docx });
   parentPort.postMessage({ ok: true, kind: 'script', status: 'completed', logs });
 } catch (error) {
   const message = error && typeof error.message === 'string' ? error.message : String(error);

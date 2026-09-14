@@ -13,7 +13,7 @@ runlet libraries
 `run.js` exports one default async function:
 
 ```js
-export default async function ({ workspace, run, input, pdf, csv, zip, xlsx, docx }) {
+export default async function ({ workspace, run, input, data, pdf, csv, zip, xlsx, docx }) {
   run.log('Starting');
 }
 ```
@@ -21,6 +21,7 @@ export default async function ({ workspace, run, input, pdf, csv, zip, xlsx, doc
 - `workspace` reads and changes files inside the registered workspace.
 - `run` writes messages to the Runlet run log.
 - `input` contains values from controls declared in `runlet.json`.
+- `data` reads and updates the workspace's Inbox tables.
 - `pdf`, `csv`, `zip`, `xlsx`, and `docx` are bundled file helpers.
 
 Scripts cannot use `import`, `require`, Node.js filesystem APIs, `process`, child processes, shell commands, native binaries, installed npm packages, secrets, or paths outside the registered workspace.
@@ -73,6 +74,27 @@ const data = await response.json();
 - Runlet keeps the 50 most recent successful and failed runs for each Script.
 - Each saved run includes its time, duration, log messages, and final error when one occurs.
 - Run history is size-limited and stored in a hidden Runlet-managed folder inside the Script.
+
+## Workspace data tables
+
+Every Inbox has a table in the workspace database. Use `data` when a Script needs those records. The table name is shown in Runlet's Data area and is also returned when the Inbox is inspected.
+
+- `await data.listTables()` returns the available tables and their columns.
+- `await data.read(table, options)` returns rows as plain objects. `options` may include `limit` and `offset`.
+- `await data.insert(table, rows)` adds one row object or an array of row objects.
+- `await data.upsert(table, rows, keyColumns)` inserts new rows and updates matching rows. `keyColumns` is an array of column names that identifies an existing row.
+
+New columns are added automatically when `insert` or `upsert` receives a field that is not yet in the table.
+
+```js
+const prices = await data.read('invoices');
+await data.upsert('invoices', {
+  source_file: 'invoice-104.pdf',
+  ingredient: 'Bread Flour',
+  price_usd: 12.20,
+}, ['source_file', 'ingredient']);
+run.log(`The table now has ${prices.length + 1} rows`);
+```
 
 ## PDF helper
 
@@ -177,14 +199,10 @@ Dynamic string code generation and WebAssembly compilation are disabled.
 ## Complete example
 
 ```js
-export default async function ({ workspace, run, pdf, csv }) {
+export default async function ({ workspace, run, data, pdf }) {
   const source = await workspace.readBytes('scripts/invoice-import/inputs/invoice.pdf');
   const text = await pdf.extractText(source);
-  const output = csv.stringify(
-    [{ source: 'invoice.pdf', text }],
-    { header: true, columns: ['source', 'text'] },
-  );
-  await workspace.write('scripts/invoice-import/outputs/invoices.csv', output);
-  run.log('Created invoices.csv');
+  await data.upsert('invoices', { source_file: 'invoice.pdf', text }, ['source_file']);
+  run.log('Saved invoice.pdf to the invoices table');
 }
 ```

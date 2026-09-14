@@ -31,7 +31,8 @@ app.get('/api/state', route(async () => {
   const scripts = selected ? await workshop.listScripts(selected.id) : [];
   const prompts = selected ? await workshop.listPrompts(selected.id) : [];
   const files = selected ? await workshop.listFiles(selected.id) : [];
-  return { ...state, selected, scripts, prompts, files, defaultFolder: path.join(os.homedir(), 'Runlet Workspaces') };
+  const dataTables = selected ? await workshop.listDataTables(selected.id) : [];
+  return { ...state, selected, scripts, prompts, files, dataTables, defaultFolder: path.join(os.homedir(), 'Runlet Workspaces') };
 }));
 app.get('/api/health', (_request, response) => response.json({ ok: true, name: 'runlet', pid: process.pid, instanceToken }));
 app.get('/api/connections', route(async () => connections.listConnections()));
@@ -47,6 +48,8 @@ app.get('/api/files/read', route(async ({ query }) => ({ content: await workshop
 app.put('/api/files', route(async ({ body }) => workshop.writeFile(body.workspaceId, body.path, body.content)));
 app.post('/api/files/folder', route(async ({ body }) => workshop.makeDirectory(body.workspaceId, body.path)));
 app.patch('/api/files/move', route(async ({ body }) => workshop.moveFile(body.workspaceId, body.from, body.to)));
+app.post('/api/files/copy', route(async ({ body }) => workshop.copyFile(body.workspaceId, body.from, body.to)));
+app.post('/api/files/upload', route(async ({ body }) => workshop.uploadFiles(body.workspaceId, body.folder || '.', (body.files || []).map((file) => ({ name: file.name, data: Buffer.from(file.data || '', 'base64') })))));
 app.post('/api/files/open', route(async ({ body }) => {
   const workspace = await workshop.getWorkspace(body.workspaceId);
   const target = workshop.resolveInside(workspace.path, body.path);
@@ -55,6 +58,17 @@ app.post('/api/files/open', route(async ({ body }) => {
 }));
 app.post('/api/inboxes', route(async ({ body }) => workshop.setupInbox(body.workspaceId, body.path, { repair: Boolean(body.repair) })));
 app.patch('/api/inboxes', route(async ({ body }) => workshop.setInboxEnabled(body.workspaceId, body.path, Boolean(body.enabled))));
+app.get('/api/data/tables', route(async ({ query }) => workshop.listDataTables(query.workspaceId)));
+app.post('/api/data/tables', route(async ({ body }) => workshop.createDataTable(body.workspaceId, body.name)));
+app.get('/api/data/tables/:table', route(async ({ params, query }) => workshop.getDataTable(query.workspaceId, params.table, query)));
+app.post('/api/data/tables/:table/columns', route(async ({ params, body }) => workshop.addDataColumn(body.workspaceId, params.table, body.name)));
+app.patch('/api/data/tables/:table/columns/:column', route(async ({ params, body }) => Object.hasOwn(body, 'name')
+  ? workshop.renameDataColumn(body.workspaceId, params.table, params.column, body.name)
+  : workshop.moveDataColumn(body.workspaceId, params.table, params.column, body.direction)));
+app.delete('/api/data/tables/:table/columns/:column', route(async ({ params, body }) => workshop.deleteDataColumn(body.workspaceId, params.table, params.column)));
+app.post('/api/data/tables/:table/rows', route(async ({ params, body }) => workshop.addDataRow(body.workspaceId, params.table, body.values || {})));
+app.patch('/api/data/tables/:table/rows/:rowId', route(async ({ params, body }) => workshop.updateDataCell(body.workspaceId, params.table, params.rowId, body.column, body.value)));
+app.delete('/api/data/tables/:table/rows/:rowId', route(async ({ params, body }) => workshop.deleteDataRow(body.workspaceId, params.table, params.rowId)));
 app.post('/api/scripts/:slug/run', route(async ({ params, body }) => workshop.runScript(body.workspaceId, params.slug, body.input || {})));
 app.get('/api/scripts/:slug/runs', route(async ({ params, query }) => workshop.getScriptRunHistory(query.workspaceId, params.slug)));
 app.get('/api/scripts/:slug/results', route(async ({ params, query }) => workshop.getScriptResults(query.workspaceId, params.slug)));
