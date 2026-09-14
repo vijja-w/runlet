@@ -60,6 +60,7 @@ app.post('/api/inboxes', route(async ({ body }) => workshop.setupInbox(body.work
 app.patch('/api/inboxes', route(async ({ body }) => workshop.setInboxEnabled(body.workspaceId, body.path, Boolean(body.enabled))));
 app.get('/api/data/tables', route(async ({ query }) => workshop.listDataTables(query.workspaceId)));
 app.post('/api/data/tables', route(async ({ body }) => workshop.createDataTable(body.workspaceId, body.name)));
+app.delete('/api/data/tables/:table', route(async ({ params, body }) => workshop.deleteDataTable(body.workspaceId, params.table)));
 app.get('/api/data/tables/:table', route(async ({ params, query }) => workshop.getDataTable(query.workspaceId, params.table, query)));
 app.post('/api/data/tables/:table/columns', route(async ({ params, body }) => workshop.addDataColumn(body.workspaceId, params.table, body.name)));
 app.patch('/api/data/tables/:table/columns/:column', route(async ({ params, body }) => Object.hasOwn(body, 'name')

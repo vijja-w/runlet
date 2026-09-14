@@ -163,6 +163,12 @@ test('creates standalone workspace Tables', async () => {
   await runlet.renameDataColumn(current.id, created.table_name, 'Column 1', 'Supplier');
   assert.equal((await runlet.getDataTable(current.id, created.table_name)).rows[0].values.Supplier, 'Golden Grain');
   await assert.rejects(runlet.createDataTable(current.id, 'suppliers'), /already exists/i);
+  const second = await runlet.createDataTable(current.id, 'Markets');
+  const ordered = await runlet.reorderItems(current.id, 'tables', [second.table_name, created.table_name]);
+  assert.deepEqual(ordered.filter((table) => table.source_kind === 'table').map((table) => table.display_name), ['Markets', 'Suppliers']);
+  await runlet.deleteDataTable(current.id, created.table_name);
+  await assert.rejects(runlet.getDataTable(current.id, created.table_name), /not found/i);
+  await runlet.deleteDataTable(current.id, second.table_name);
 });
 
 test('migrates legacy Inbox CSV data into its workspace database', async () => {

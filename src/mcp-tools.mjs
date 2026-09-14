@@ -14,8 +14,8 @@ export const mcpToolGroups = [
     name: 'Files and Inboxes',
     tools: [
       ['list_files', 'List one directory inside a registered workspace.'],
-      ['list_inboxes', 'List enabled Runlet Inboxes in a workspace, including readiness, instructions, data, and pending files. Use this before processing Inbox files.'],
-      ['get_inbox', 'Inspect one configured Inbox, including its instructions, data table, readiness, paths, and pending files.'],
+      ['list_inboxes', 'List enabled Runlet Inboxes, including readiness, exact table names, paths, row counts, and pending files. Use this before processing Inbox files.'],
+      ['get_inbox', 'Inspect one configured Inbox, including its instructions, exact table name, readiness, paths, and pending files.'],
       ['update_inbox_instructions', 'Create or replace the instructions for one configured Inbox.'],
       ['read_file', 'Read a UTF-8 text file inside a registered workspace.'],
       ['write_file', 'Create or replace a UTF-8 text file inside a registered workspace.'],
@@ -27,10 +27,11 @@ export const mcpToolGroups = [
   {
     name: 'Data',
     tools: [
-      ['list_data_tables', 'List Inbox-backed and user-created tables in a registered workspace.'],
+      ['list_data_tables', 'List Inbox-backed and standalone Tables, including each exact table_name, source kind, columns, and row count.'],
       ['create_data_table', 'Create an editable user table in a registered workspace.'],
-      ['get_data_table', 'Read rows and columns from one workspace data table.'],
-      ['write_data_rows', 'Insert or update rows in a workspace data table. Use keyColumns for idempotent Inbox processing.'],
+      ['delete_data_table', 'Permanently delete a standalone user Table and all of its rows. Never deletes an Inbox table.'],
+      ['get_data_table', 'Read a page of rows and column metadata from an exact workspace table_name; returned row IDs support later edits.'],
+      ['write_data_rows', 'Insert many rows, or update matching rows using keyColumns. New columns are added automatically with an inferred internal SQLite type.'],
       ['update_data_cell', 'Edit one cell using the row id returned by get_data_table.'],
       ['delete_data_row', 'Delete one row using the row id returned by get_data_table.'],
       ['add_data_column', 'Add a text column to a workspace data table.'],

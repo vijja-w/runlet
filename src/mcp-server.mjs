@@ -13,7 +13,9 @@ Scripts are small local apps under scripts/<kebab-case-slug>/. Each has runlet.j
 
 Prompts are reusable AI instructions under prompts/<kebab-case-slug>/PROMPT.md. They are not programs and do not launch a second AI. When asked to create a Prompt, call get_prompt_template and then create_prompt. When asked to use a Prompt, call get_prompt and follow its content using files attached to the conversation or explicitly named workspace files. The user can also copy a Prompt from Runlet and paste it into any compatible AI.
 
-Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, processed/, and needs-review/. Each Inbox owns a table in the workspace database. Loose files in an Inbox root are waiting to be processed. Always call list_inboxes instead of scanning for instruction files, then call get_inbox to read the instructions and table name before processing it. Process only enabled, ready Inboxes; leave an Inbox untouched when it needs attention. For each ready Inbox, follow its instructions, write rows with write_data_rows, move successful source files to its processed folder, and move genuinely ambiguous files to its needs-review folder. Use source_file plus source_row as keys when the instructions call for idempotent line-item processing. When the user asks to edit an Inbox table, use the Data tools to inspect and make the requested cell, row, or column changes.`;
+Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, processed/, and needs-review/. Each Inbox owns a table in the workspace database. Loose files in an Inbox root are waiting to be processed. Always call list_inboxes instead of scanning for instruction files, then call get_inbox to read the instructions and exact table name before processing it. Process only enabled, ready Inboxes; leave an Inbox untouched when it needs attention. For each ready Inbox, follow its instructions, write rows with write_data_rows, move successful source files to its processed folder, and move genuinely ambiguous files to its needs-review folder. Use source_file plus source_row as keys when the instructions call for idempotent line-item processing.
+
+The workspace can also contain standalone user-created Tables. Use list_data_tables to resolve the exact table_name and distinguish Inbox tables from standalone Tables, then use get_data_table before editing. Use the structured Data tools instead of opening or editing the SQLite database file directly. Row IDs returned by get_data_table identify rows for cell edits and deletion. write_data_rows can insert many rows or update matching rows using keyColumns. add_data_column creates a text column; columns first introduced by write_data_rows may be stored internally as text, integer, or real based on their values. Types are an internal detail and are not user-facing. Use rename_data_column and move_data_column for non-destructive structure changes, and delete tools only when the user explicitly requested deletion.`;
 
 const server = new McpServer({ name: 'runlet', version: '0.18.0' }, { instructions });
 const textResult = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -105,21 +107,26 @@ server.registerTool('list_data_tables', {
 
 server.registerTool('create_data_table', {
   description: mcpToolDescriptions.create_data_table,
-  inputSchema: z.object({ workspaceId, name: z.string().min(1) }),
+  inputSchema: z.object({ workspaceId, name: z.string().min(1).describe('User-facing table name. It must be unique within the workspace.') }),
 }, async ({ workspaceId: id, name }) => textResult(await runlet.createDataTable(id, name)));
+
+server.registerTool('delete_data_table', {
+  description: mcpToolDescriptions.delete_data_table,
+  inputSchema: z.object({ workspaceId, table: z.string().describe('Exact standalone table_name returned by list_data_tables.') }),
+}, async ({ workspaceId: id, table }) => textResult(await runlet.deleteDataTable(id, table)));
 
 server.registerTool('get_data_table', {
   description: mcpToolDescriptions.get_data_table,
-  inputSchema: z.object({ workspaceId, table: z.string(), limit: z.number().int().min(1).max(5000).default(1000), offset: z.number().int().min(0).default(0) }),
+  inputSchema: z.object({ workspaceId, table: z.string().describe('Exact table_name returned by list_data_tables or get_inbox.'), limit: z.number().int().min(1).max(5000).default(1000), offset: z.number().int().min(0).default(0) }),
 }, async ({ workspaceId: id, table, limit, offset }) => textResult(await runlet.getDataTable(id, table, { limit, offset })));
 
 server.registerTool('write_data_rows', {
   description: mcpToolDescriptions.write_data_rows,
   inputSchema: z.object({
     workspaceId,
-    table: z.string(),
+    table: z.string().describe('Exact table_name returned by list_data_tables or get_inbox.'),
     rows: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))),
-    keyColumns: z.array(z.string()).default([]),
+    keyColumns: z.array(z.string()).default([]).describe('Existing column names that identify a row to update. Leave empty to insert every row.'),
   }),
 }, async ({ workspaceId: id, table, rows, keyColumns }) => textResult(await runlet.writeDataRows(id, table, rows, keyColumns)));
 

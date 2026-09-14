@@ -18,6 +18,9 @@ let selectedWorkspaceId = null;
 let connectionsLoading = false;
 let scriptSearch = '';
 let promptSearch = '';
+let inboxDataSearch = '';
+let tablesSearch = '';
+let connectionSearch = '';
 let fileSearch = '';
 let fileSort = 'none';
 let fileSortDirection = 'ascending';
@@ -78,7 +81,7 @@ async function refresh() {
 
 function render() {
   if (!state.selected) return renderWelcome();
-  const collectionView = !selectedScript && !selectedPrompt && (view === 'scripts' || view === 'prompts' || ((view === 'data' || view === 'tables') && !selectedDataTable));
+  const collectionView = !selectedScript && !selectedPrompt && (view === 'scripts' || view === 'prompts' || view === 'connections' || ((view === 'data' || view === 'tables') && !selectedDataTable));
   const content = selectedScript ? scriptDetail(selectedScript)
     : selectedPrompt ? promptDetail(selectedPrompt)
       : view === 'data' ? dataView() : view === 'tables' ? tablesView() : view === 'files' ? filesView() : view === 'prompts' ? promptsView() : view === 'connections' ? connectionsView() : scriptsView();
@@ -89,15 +92,19 @@ function render() {
         <span><b>${escapeHtml(state.selected.name)}</b><small class="workspace-breadcrumb">${workspaceBreadcrumb(state.selected.path)}</small></span>
       </button>
       <nav>
-        <div class="nav-group"><button data-view="files" class="${view === 'files' ? 'active' : ''}">Files <em>${state.files.length}</em></button></div>
-        <div class="nav-group"><button data-view="data" class="${view === 'data' ? 'active' : ''}">Inbox Data <em>${state.dataTables.filter((table) => table.source_kind !== 'table').length}</em></button><button data-view="tables" class="${view === 'tables' ? 'active' : ''}">Tables <em>${state.dataTables.filter((table) => table.source_kind === 'table').length}</em></button></div>
-        <div class="nav-group"><button data-view="scripts" class="${view === 'scripts' ? 'active' : ''}">Scripts <em>${state.scripts.length}</em></button><button data-view="prompts" class="${view === 'prompts' ? 'active' : ''}">Prompts <em>${state.prompts.length}</em></button></div>
-        <div class="nav-group"><button data-view="connections" class="${view === 'connections' ? 'active' : ''}">Connections</button></div>
+        <div class="nav-group">${sidebarNavItem('files', 'Files', state.files.length, 'Drop files onto a folder to copy them there. The original files stay where they are.')}</div>
+        <div class="nav-group">${sidebarNavItem('data', 'Inbox Data', state.dataTables.filter((table) => table.source_kind !== 'table').length, selectedDataTable && view === 'data' && dataTable ? dataHelpText(dataTable) : 'Tables of information collected by your Inboxes.')}${sidebarNavItem('tables', 'Tables', state.dataTables.filter((table) => table.source_kind === 'table').length, selectedDataTable && view === 'tables' && dataTable ? dataHelpText(dataTable) : 'Spreadsheet-like data you create yourself. Your AI can also use Runlet to read and edit it.')}</div>
+        <div class="nav-group">${sidebarNavItem('scripts', 'Scripts', state.scripts.length, 'Small programs that run locally.')}${sidebarNavItem('prompts', 'Prompts', state.prompts.length, 'Saved instructions for your AI.')}</div>
+        <div class="nav-group">${sidebarNavItem('connections', 'Connections', null, 'Connect Runlet to supported AI apps installed on this computer.')}</div>
       </nav>
     </aside>
     <section class="main ${collectionView ? 'collection-main' : ''} ${view === 'files' && !selectedScript && !selectedPrompt ? 'files-main' : ''} ${(view === 'data' || view === 'tables') && !selectedScript && !selectedPrompt ? 'data-main' : ''}">${content}</section>
   </main><div id="modal-root"></div><div id="toast-root"></div>`;
   bindEvents();
+}
+
+function sidebarNavItem(key, label, count, info) {
+  return `<div class="nav-item ${view === key ? 'active' : ''}"><button data-view="${key}">${escapeHtml(label)}</button><span class="nav-item-meta">${inlineInfo(`About ${label}`, info)}</span></div>`;
 }
 
 function workspaceBreadcrumb(value) {
@@ -130,10 +137,6 @@ function topbar(title, subtitle = '', controls = '', editableKind = '') {
   </div><div class="top-controls">${controls}</div></header>`;
 }
 
-function collectionHeader(title, info, controls = '') {
-  return `<header class="collection-header"><div class="collection-title"><h1>${escapeHtml(title)}</h1>${inlineInfo(`About ${title}`, info)}</div>${controls}</header>`;
-}
-
 function scriptsView() {
   const cards = state.scripts.length
     ? state.scripts.map((script) => `<article class="action-card" data-script="${escapeHtml(script.slug)}" data-order-item="${escapeHtml(script.slug)}" data-search-text="${escapeHtml(`${script.name} ${script.description}`.toLowerCase())}">
@@ -148,7 +151,7 @@ function scriptsView() {
       </article>`).join('')
     : `<div class="empty"><h2>No Scripts yet</h2><p>Try asking: “Ask Runlet to create a Script in ${escapeHtml(state.selected.name)}.”</p></div>`;
   const search = state.scripts.length ? listSearch('script', scriptSearch) : '';
-  return `${collectionHeader('Scripts', 'Small programs that run locally.')}<div class="page collection-page">${search}<div class="action-list" data-order-list="scripts">${cards}${noSearchResults('script')}</div></div>`;
+  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="script" data-order-list="scripts">${cards}${noSearchResults('script', 'Scripts')}</div></div>`;
 }
 
 function promptsView() {
@@ -162,7 +165,7 @@ function promptsView() {
       </article>`).join('')
     : `<div class="empty"><h2>No Prompts yet</h2><p>Try asking: “Ask Runlet to create a Prompt in ${escapeHtml(state.selected.name)}.”</p></div>`;
   const search = state.prompts.length ? listSearch('prompt', promptSearch) : '';
-  return `${collectionHeader('Prompts', 'Saved instructions for your AI.')}<div class="page collection-page">${search}<div class="action-list" data-order-list="prompts">${cards}${noSearchResults('prompt')}</div></div>`;
+  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="prompt" data-order-list="prompts">${cards}${noSearchResults('prompt', 'Prompts')}</div></div>`;
 }
 
 function dataView() {
@@ -174,12 +177,13 @@ function dataView() {
     return `<div class="data-detail">${active ? renderDataSheet(active) : '<div class="empty"><p>Loading table…</p></div>'}</div>`;
   }
   const cards = tables.length
-    ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}">
+    ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}" data-search-text="${escapeHtml(`${table.inbox_path} ${table.display_name}`.toLowerCase())}">
         <div class="action-copy data-table-copy">${dataListBreadcrumb(table)}<small>${table.rowCount} ${table.rowCount === 1 ? 'row' : 'rows'}</small></div>
         <div class="card-actions"><button class="primary small" data-open-data-table="${escapeHtml(table.table_name)}">Open</button></div>
       </article>`).join('')
     : `<div class="empty"><h2>No Inbox Data yet</h2><p>Turn a folder into an Inbox to give it a table.</p></div>`;
-  return `${collectionHeader('Inbox Data', 'Tables of information collected by your Inboxes.')}<div class="page collection-page"><div class="action-list">${cards}</div></div>`;
+  const search = tables.length ? listSearch('inbox-data', inboxDataSearch, 'Inbox Data') : '';
+  return `<div class="page collection-page">${collectionToolbar(search)}<div class="action-list" data-filter-list="inbox-data">${cards}${noSearchResults('inbox-data', 'Inbox Data')}</div></div>`;
 }
 
 function tablesView() {
@@ -189,9 +193,10 @@ function tablesView() {
     return `<div class="data-detail">${active ? renderDataSheet(active) : '<div class="empty"><p>Loading table…</p></div>'}</div>`;
   }
   const cards = tables.length
-    ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}"><div class="action-copy"><h2>${escapeHtml(table.display_name)}</h2><small>${table.rowCount} ${table.rowCount === 1 ? 'row' : 'rows'}</small></div><div class="card-actions"><button class="primary small" data-open-data-table="${escapeHtml(table.table_name)}">Open</button></div></article>`).join('')
+    ? tables.map((table) => `<article class="action-card" data-data-table="${escapeHtml(table.table_name)}" data-order-item="${escapeHtml(table.table_name)}" data-search-text="${escapeHtml(table.display_name.toLowerCase())}"><div class="action-copy"><h2>${escapeHtml(table.display_name)}</h2><small>${table.rowCount} ${table.rowCount === 1 ? 'row' : 'rows'}</small></div><div class="card-actions"><button class="primary small" data-open-data-table="${escapeHtml(table.table_name)}">Open</button>${dragHandle('table', table.table_name)}</div></article>`).join('')
     : `<div class="empty"><h2>No Tables yet</h2><p>Create a table for information you want to organize yourself.</p></div>`;
-  return `${collectionHeader('Tables', 'Tables are spreadsheet-like data you create yourself. Your AI can also use Runlet to read and edit them.', '<button class="primary small" id="new-data-table">+ Table</button>')}<div class="page collection-page"><div class="action-list">${cards}</div></div>`;
+  const search = tables.length ? listSearch('table-list', tablesSearch, 'Tables') : '';
+  return `<div class="page collection-page">${collectionToolbar(search, iconButton('add', 'New Table', 'id="new-data-table"'))}<div class="action-list" data-filter-list="table-list" data-order-list="tables">${cards}${noSearchResults('table-list', 'Tables')}</div></div>`;
 }
 
 function dataListBreadcrumb(table) {
@@ -219,23 +224,27 @@ function renderDataSheet(table) {
     const active = dataSortColumn === column.name;
     const arrow = active ? (dataSortDirection === 'ascending' ? ' ↑' : ' ↓') : '';
     return `<th class="data-column-heading"><div><button class="data-column-sort" data-data-sort="${escapeHtml(column.name)}">${escapeHtml(column.name)}${arrow}</button>${dataMenu(`Column options for ${column.name}`, `
-      <button data-rename-data-column="${escapeHtml(column.name)}">Rename column</button>
+      <button data-rename-data-column="${escapeHtml(column.name)}">Rename</button>
       <button data-move-data-column="left" data-data-column-name="${escapeHtml(column.name)}" ${index === 0 ? 'disabled' : ''}>Move left</button>
       <button data-move-data-column="right" data-data-column-name="${escapeHtml(column.name)}" ${index === table.columns.length - 1 ? 'disabled' : ''}>Move right</button>
-      <button class="menu-danger" data-delete-data-column="${escapeHtml(column.name)}">Delete column</button>`)}</div></th>`;
+      <button class="menu-danger" data-delete-data-column="${escapeHtml(column.name)}">Delete</button>`)}</div></th>`;
   }).join('');
-  const body = rows.map((row, index) => `<tr data-data-row-record="${row.id}"><th class="data-row-number"><span>${index + 1}</span>${dataMenu(`Row ${index + 1} options`, `<button class="menu-danger" data-delete-data-row="${row.id}">Delete row</button>`)}</th>${table.columns.map((column) => {
+  const body = rows.map((row, index) => `<tr data-data-row-record="${row.id}"><th class="data-row-number"><span>${index + 1}</span>${dataMenu(`Row ${index + 1} options`, `<button class="menu-danger" data-delete-data-row="${row.id}">Delete</button>`)}</th>${table.columns.map((column) => {
     const value = formatDataValue(column, row.values[column.name]);
     const numeric = ['INTEGER', 'REAL'].includes(column.type) ? ' data-number' : '';
     return `<td class="${numeric}" contenteditable="plaintext-only" spellcheck="false" data-data-row="${row.id}" data-data-column="${escapeHtml(column.name)}" data-original="${escapeHtml(value)}">${escapeHtml(value)}</td>`;
   }).join('')}</tr>`).join('');
-  const help = table.source_kind === 'table'
-    ? `Edit cells directly, or use the three-dot menus to move and delete rows and columns.\n\nYou can also ask your AI: “Use Runlet to modify the ${table.table_name} table in the ‘${state.selected.name}’ workspace.”`
-    : `Edit cells directly, or use the three-dot menus to move and delete rows and columns.\n\nYou can also ask your AI: “Use Runlet to modify the ${table.table_name} table for the Inbox at ‘${table.inbox_path}’ in the ‘${state.selected.name}’ workspace.”`;
   return `<section class="data-sheet">
-    <div class="data-sheet-toolbar"><nav class="breadcrumbs data-path-breadcrumb" aria-label="Inbox folder">${dataFileBreadcrumbs(table)}</nav><label class="data-search"><span class="visually-hidden">Search table</span><input id="data-search" type="search" value="${escapeHtml(dataSearch)}" placeholder="Search"></label><span class="data-visible-count">${rows.length}${dataSearch ? ` of ${table.rowCount}` : ''} rows</span><button class="data-compact-action" id="add-data-row">+ Row</button><button class="data-compact-action" id="add-data-column">+ Col</button>${iconButton('refresh', 'Refresh', 'id="refresh"')}</div>
-    <div class="data-grid-wrap"><table class="data-grid"><thead><tr><th class="data-corner">${inlineInfo(`How to edit ${table.display_name}`, help)}</th>${headers}</tr></thead><tbody>${body || `<tr><td class="data-empty-row" colspan="${table.columns.length + 1}">No matching rows.</td></tr>`}</tbody></table></div>
+    <div class="data-sheet-toolbar"><nav class="breadcrumbs data-path-breadcrumb" aria-label="Inbox folder">${dataFileBreadcrumbs(table)}</nav><label class="data-search compact-search">${icons.search}<span class="visually-hidden">Search table</span><input id="data-search" type="search" value="${escapeHtml(dataSearch)}" placeholder="Search"></label><span class="data-visible-count">${rows.length}${dataSearch ? ` of ${table.rowCount}` : ''} rows</span><button class="data-compact-action" id="add-data-row">+ Row</button><button class="data-compact-action" id="add-data-column">+ Col</button>${table.source_kind === 'table' ? iconButton('remove', 'Delete Table', 'data-delete-data-table') : ''}${iconButton('refresh', 'Refresh', 'id="refresh"')}</div>
+    <div class="data-grid-wrap"><table class="data-grid"><thead><tr><th class="data-corner"></th>${headers}</tr></thead><tbody>${body || `<tr><td class="data-empty-row" colspan="${table.columns.length + 1}">No matching rows.</td></tr>`}</tbody></table></div>
   </section>`;
+}
+
+function dataHelpText(table) {
+  const target = table.source_kind === 'table'
+    ? `the ${table.table_name} table in the ‘${state.selected.name}’ workspace`
+    : `the ${table.table_name} table for the Inbox at ‘${table.inbox_path}’ in the ‘${state.selected.name}’ workspace`;
+  return `Edit cells directly, or use the three-dot menus to rename and move columns or delete rows and columns.\n\nFor more advanced edits, you can also ask your AI: “Use Runlet to modify ${target}.”`;
 }
 
 function dataFileBreadcrumbs(table) {
@@ -259,13 +268,17 @@ function formatDataValue(column, value) {
   return String(value);
 }
 
-function listSearch(kind, value) {
-  const label = kind === 'script' ? 'Scripts' : 'Prompts';
-  return `<label class="list-search" for="${kind}-search">${icons.search}<span class="visually-hidden">Search ${label}</span><input id="${kind}-search" type="search" value="${escapeHtml(value)}" placeholder="Search ${label}" autocomplete="off"></label>`;
+function listSearch(kind, value, customLabel = '') {
+  const label = customLabel || (kind === 'script' ? 'Scripts' : 'Prompts');
+  return `<label class="list-search compact-search" for="${kind}-search">${icons.search}<span class="visually-hidden">Search ${label}</span><input id="${kind}-search" type="search" value="${escapeHtml(value)}" placeholder="Search ${label}" autocomplete="off"></label>`;
 }
 
-function noSearchResults(kind) {
-  return `<div class="empty compact search-empty" data-search-empty="${kind}" hidden><p>No matching ${kind === 'script' ? 'Scripts' : 'Prompts'}.</p></div>`;
+function collectionToolbar(search, controls = '') {
+  return `<div class="collection-toolbar">${search || '<span></span>'}${controls ? `<div class="collection-toolbar-actions">${controls}</div>` : ''}</div>`;
+}
+
+function noSearchResults(kind, label) {
+  return `<div class="empty compact search-empty" data-search-empty="${kind}" hidden><p>No matching ${label}.</p></div>`;
 }
 
 function scriptDetail(script) {
@@ -274,7 +287,7 @@ function scriptDetail(script) {
     : '<p class="muted">This Script is ready to run.</p>';
   const resultPanels = scriptResults.filter((result) => !result.missing).map(renderResult).join('');
   const topControls = `<button class="secondary" id="script-run-history" type="button">Run history</button>${script.hasView ? `<a class="secondary" target="_blank" rel="noopener" href="/script-view/${state.selected.id}/${encodeURIComponent(script.slug)}">Previous run</a>` : ''}${iconButton('remove', 'Delete Script', `data-delete-kind="script" data-delete-slug="${escapeHtml(script.slug)}"`)}`;
-  return `${topbar(script.name, script.description, topControls, 'script')}<div class="script-app">
+  return `<div class="script-app"><div class="detail-toolbar"><div class="detail-identity"><h1 class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="script" data-meta-field="name">${escapeHtml(script.name)}</h1><p class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="script" data-meta-field="description">${escapeHtml(script.description)}</p></div><div class="top-controls">${topControls}</div></div>
     <form id="script-run-form" class="control-panel">
       <div class="control-grid">${controlFields}</div>
       <div class="run-footer"><span>Runs locally in this workspace.</span><button class="primary run-script" type="submit" data-run-script="${escapeHtml(script.slug)}">Run</button></div>
@@ -324,7 +337,7 @@ function renderResult(result) {
 
 function promptDetail(prompt) {
   const controls = `<button class="secondary copy-prompt" data-copy-prompt="${escapeHtml(prompt.slug)}">Copy prompt</button>${iconButton('remove', 'Delete Prompt', `data-delete-kind="prompt" data-delete-slug="${escapeHtml(prompt.slug)}"`)}`;
-  return `${topbar(prompt.name, prompt.description, controls, 'prompt')}<div class="prompt-page">
+  return `<div class="prompt-page"><div class="detail-toolbar"><div class="detail-identity"><h1 class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="prompt" data-meta-field="name">${escapeHtml(prompt.name)}</h1><p class="editable-meta" contenteditable="plaintext-only" spellcheck="true" data-meta-kind="prompt" data-meta-field="description">${escapeHtml(prompt.description)}</p></div><div class="top-controls">${controls}</div></div>
     <form id="prompt-form" class="prompt-editor">
       <label for="prompt-content">Prompt</label>
       <textarea id="prompt-content" name="content" spellcheck="true">${escapeHtml(prompt.content)}</textarea>
@@ -345,9 +358,9 @@ function filesView() {
   const currentName = filePath === '.' ? state.selected.name : filePath.split('/').filter(Boolean).at(-1);
   const sortLabels = { none: 'None', name: 'Name', inbox: 'Inbox', kind: 'Kind', modified: 'Date Modified', size: 'Size' };
   return `<header class="files-topbar">
-    <div class="files-location"><nav class="breadcrumbs" aria-label="Current folder">${fileBreadcrumbs()}</nav>${inlineInfo('About copying files', 'Drop files onto a folder to copy them there. The original files stay where they are.')}</div>
+    <div class="files-location"><nav class="breadcrumbs" aria-label="Current folder">${fileBreadcrumbs()}</nav></div>
     <div class="files-actions">
-      <label class="file-search" for="file-search">${icons.search}<span class="visually-hidden">Search this folder</span><input id="file-search" type="search" value="${escapeHtml(fileSearch)}" placeholder="Search" autocomplete="off"></label>
+      <label class="file-search compact-search" for="file-search">${icons.search}<span class="visually-hidden">Search this folder</span><input id="file-search" type="search" value="${escapeHtml(fileSearch)}" placeholder="Search" autocomplete="off"></label>
       <details class="sort-menu"><summary class="icon-button" aria-label="Sort files" data-tooltip="Sort files">${icons.sort}</summary><div class="sort-popover" role="menu"><p>Sort by</p>${Object.entries(sortLabels).map(([value, label]) => `<button role="menuitemradio" aria-label="${label}" aria-checked="${fileSort === value}" data-file-sort="${value}"><span>${fileSort === value ? '✓' : ''}</span>${label}</button>`).join('')}</div></details>
       ${iconButton('newFolder', 'New Folder', 'id="new-folder"')}
       ${iconButton('refresh', 'Refresh', 'id="refresh"')}
@@ -429,14 +442,15 @@ function formatFileDate(value) {
 function connectionsView() {
   const cards = connectionsLoading
     ? '<div class="empty compact"><p>Checking your local AI apps…</p></div>'
-    : (state.connections || []).map((connection) => `<article class="connection-card">
+    : (state.connections || []).map((connection) => `<article class="connection-card" data-search-text="${escapeHtml(`${connection.name} ${connection.status} ${connection.note || ''}`.toLowerCase())}">
         <div class="connection-copy">
           <div class="connection-heading"><h2>${escapeHtml(connection.name)}</h2><span class="connection-status ${connection.connected ? 'connected' : ''}">${escapeHtml(connection.status)}</span></div>
           <p>${escapeHtml(connection.note || (connection.available ? 'Connect Runlet to this AI.' : `Install ${connection.name} to connect it.`))}</p>
         </div>
         <button class="${connection.connected ? 'secondary' : 'primary'} connection-action" data-connection="${connection.id}" data-connected="${connection.connected}" data-action="${escapeHtml(connection.action || (connection.connected ? 'disconnect' : 'connect'))}" ${connection.available ? '' : 'disabled'}>${escapeHtml(connection.actionLabel || (connection.connected ? 'Disconnect' : 'Connect'))}</button>
       </article>`).join('');
-  return `${topbar('Connections', 'Use Runlet from the AI apps installed on this computer.', iconButton('refresh', 'Refresh', 'id="refresh-connections"'))}<div class="page connection-list">${cards}</div>`;
+  const search = state.connections?.length ? listSearch('connection', connectionSearch, 'Connections') : '';
+  return `<div class="page collection-page">${collectionToolbar(search, iconButton('refresh', 'Refresh', 'id="refresh-connections"'))}<div class="action-list connection-list" data-filter-list="connection">${cards}${noSearchResults('connection', 'Connections')}</div></div>`;
 }
 
 function fileBreadcrumbs() {
@@ -489,6 +503,10 @@ function bindEvents() {
   document.querySelectorAll('[data-copy-prompt]').forEach((button) => button.onclick = (event) => { event.stopPropagation(); copyPrompt(button.dataset.copyPrompt); });
   bindListControls('script');
   bindListControls('prompt');
+  bindListControls('table');
+  bindSimpleListSearch('inbox-data', inboxDataSearch, (value) => { inboxDataSearch = value; });
+  bindSimpleListSearch('table-list', tablesSearch, (value) => { tablesSearch = value; });
+  bindSimpleListSearch('connection', connectionSearch, (value) => { connectionSearch = value; });
   document.querySelectorAll('[data-delete-kind]').forEach((button) => button.onclick = () => confirmDeleteItem(button.dataset.deleteKind, button.dataset.deleteSlug));
   document.querySelectorAll('[data-file-path]').forEach((button) => button.onclick = () => openFolder(button.dataset.filePath));
   bindFileBrowser();
@@ -528,6 +546,7 @@ function bindDataBrowser() {
   document.querySelectorAll('[data-data-file-path]').forEach((button) => button.addEventListener('click', () => void openFolder(button.dataset.dataFilePath, 'files')));
   document.querySelector('[data-tables-home]')?.addEventListener('click', () => { selectedDataTable = null; dataTable = null; render(); });
   document.querySelector('#new-data-table')?.addEventListener('click', newDataTableModal);
+  document.querySelector('[data-delete-data-table]')?.addEventListener('click', confirmDeleteDataTable);
   document.querySelectorAll('[data-data-table]').forEach((card) => card.onclick = (event) => {
     if (event.target.closest('button,a')) return;
     openDataTable(card.dataset.dataTable);
@@ -740,6 +759,24 @@ async function moveDataColumn(column, direction) {
   } catch (error) { toast(error.message, true); }
 }
 
+function bindSimpleListSearch(kind, value, save) {
+  const input = document.querySelector(`#${kind}-search`);
+  if (!input) return;
+  const apply = () => {
+    save(input.value);
+    applyListFilter(kind, input.value);
+  };
+  input.addEventListener('input', apply);
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    input.value = '';
+    apply();
+  });
+  input.value = value;
+  applyListFilter(kind, value);
+}
+
 function bindListControls(kind) {
   const plural = `${kind}s`;
   const input = document.querySelector(`#${kind}-search`);
@@ -880,10 +917,10 @@ function animateCardMove(list, draggedCard, reference) {
 
 function applyListFilter(kind, query) {
   const normalized = String(query || '').trim().toLowerCase();
-  const list = document.querySelector(`[data-order-list="${kind}s"]`);
+  const list = document.querySelector(`[data-filter-list="${kind}"]`);
   list?.classList.toggle('searching', Boolean(normalized));
   let matches = 0;
-  list?.querySelectorAll('[data-order-item]').forEach((card) => {
+  list?.querySelectorAll('[data-search-text]').forEach((card) => {
     card.hidden = normalized && !card.dataset.searchText.includes(normalized);
     if (!card.hidden) matches += 1;
   });
@@ -895,9 +932,13 @@ async function saveListOrder(kind, list) {
   const visibleOrder = [...list.querySelectorAll('[data-order-item]:not([hidden])')].map((card) => card.dataset.orderItem);
   const visible = new Set(visibleOrder);
   let visibleIndex = 0;
-  const slugs = state[kind].map((item) => visible.has(item.slug) ? visibleOrder[visibleIndex++] : item.slug);
+  const items = kind === 'tables' ? state.dataTables.filter((item) => item.source_kind === 'table') : state[kind];
+  const itemId = (item) => kind === 'tables' ? item.table_name : item.slug;
+  const slugs = items.map((item) => visible.has(itemId(item)) ? visibleOrder[visibleIndex++] : itemId(item));
   try {
-    state[kind] = await api(`/api/order/${kind}`, { method: 'PUT', body: JSON.stringify({ workspaceId: state.selected.id, slugs }) });
+    const ordered = await api(`/api/order/${kind}`, { method: 'PUT', body: JSON.stringify({ workspaceId: state.selected.id, slugs }) });
+    if (kind === 'tables') state.dataTables = ordered;
+    else state[kind] = ordered;
     render();
   } catch (error) {
     toast(error.message, true);
@@ -1425,6 +1466,37 @@ async function savePrompt(event) {
     await refresh();
     toast('Prompt saved.');
   } catch (error) { toast(error.message, true); }
+}
+
+function confirmDeleteDataTable() {
+  if (!dataTable || dataTable.source_kind !== 'table') return;
+  modal(`<div class="modal-head"><h2>Delete Table?</h2><button class="modal-close" aria-label="Close" data-tooltip="Close">×</button></div>
+    <div class="delete-confirmation">
+      <p><b>${escapeHtml(dataTable.display_name)}</b></p>
+      <p>Every row and column in this Table will be permanently deleted.</p>
+      <div class="confirmation-actions"><button class="secondary modal-close-action">Cancel</button><button class="danger-button" data-confirm-delete-table>Delete Table</button></div>
+    </div>`);
+  document.querySelector('.modal-close-action').onclick = closeModal;
+  document.querySelector('[data-confirm-delete-table]').onclick = (event) => deleteDataTable(event.currentTarget);
+}
+
+async function deleteDataTable(button) {
+  if (!dataTable || dataTable.source_kind !== 'table') return;
+  const name = dataTable.display_name;
+  button.disabled = true;
+  button.textContent = 'Deleting…';
+  try {
+    await api(`/api/data/tables/${encodeURIComponent(dataTable.table_name)}`, { method: 'DELETE', body: JSON.stringify({ workspaceId: state.selected.id }) });
+    selectedDataTable = null;
+    dataTable = null;
+    closeModal();
+    await refresh();
+    toast(`${name} was deleted.`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = 'Delete Table';
+    toast(error.message, true);
+  }
 }
 
 function confirmDeleteItem(kind, slug) {

@@ -8,6 +8,7 @@ import {
   addDataRow as addWorkspaceDataRow,
   addDataColumn as addWorkspaceDataColumn,
   createDataTable as createWorkspaceDataTable,
+  deleteDataTable as deleteWorkspaceDataTable,
   deleteDataColumn as deleteWorkspaceDataColumn,
   deleteDataRow as deleteWorkspaceDataRow,
   deleteInboxTables,
@@ -807,11 +808,13 @@ export async function listPrompts(workspaceId) {
 }
 
 export async function reorderItems(workspaceId, kind, slugs) {
-  if (!['scripts', 'prompts'].includes(kind)) throw new Error('Only Scripts and Prompts can be reordered.');
+  if (!['scripts', 'prompts', 'tables'].includes(kind)) throw new Error('Only Scripts, Prompts, and Tables can be reordered.');
   const workspace = await getWorkspace(workspaceId);
-  const items = kind === 'scripts' ? await listScripts(workspace.id) : await listPrompts(workspace.id);
+  const items = kind === 'scripts' ? await listScripts(workspace.id)
+    : kind === 'prompts' ? await listPrompts(workspace.id)
+      : (await listDataTables(workspace.id)).filter((item) => item.source_kind === 'table');
   const requested = Array.isArray(slugs) ? slugs.map(String) : [];
-  const existing = new Set(items.map((item) => item.slug));
+  const existing = new Set(items.map((item) => kind === 'tables' ? item.table_name : item.slug));
   if (requested.length !== existing.size || new Set(requested).size !== requested.length || requested.some((slug) => !existing.has(slug))) {
     throw new Error(`The ${kind} list changed. Refresh and try again.`);
   }
@@ -819,7 +822,7 @@ export async function reorderItems(workspaceId, kind, slugs) {
   state.orders ||= {};
   state.orders[workspace.id] = { ...(state.orders[workspace.id] || {}), [kind]: requested };
   await saveState(state);
-  return kind === 'scripts' ? listScripts(workspace.id) : listPrompts(workspace.id);
+  return kind === 'scripts' ? listScripts(workspace.id) : kind === 'prompts' ? listPrompts(workspace.id) : listDataTables(workspace.id);
 }
 
 export async function getPrompt(workspaceId, slug) {
@@ -1107,12 +1110,26 @@ export async function listInboxes(workspaceId, { includeDisabled = false } = {})
 export async function listDataTables(workspaceId) {
   const workspace = await getWorkspace(workspaceId);
   await listInboxes(workspace.id, { includeDisabled: true });
-  return readWorkspaceDataTables(workspace.path);
+  const tables = await readWorkspaceDataTables(workspace.path);
+  const state = await loadState();
+  const standalone = tables.filter((table) => table.source_kind === 'table');
+  const orderedStandalone = applySavedOrder(
+    standalone.map((table) => ({ ...table, slug: table.table_name, name: table.display_name })),
+    state.orders?.[workspace.id]?.tables,
+  ).map(({ slug: _slug, name: _name, ...table }) => table);
+  return [...tables.filter((table) => table.source_kind !== 'table'), ...orderedStandalone];
 }
 
 export async function createDataTable(workspaceId, name) {
   const workspace = await getWorkspace(workspaceId);
   return createWorkspaceDataTable(workspace.path, name);
+}
+
+export async function deleteDataTable(workspaceId, table) {
+  const workspace = await getWorkspace(workspaceId);
+  const deleted = await deleteWorkspaceDataTable(workspace.path, table);
+  await removeFromSavedOrder(workspace.id, 'tables', table);
+  return deleted;
 }
 
 export async function getDataTable(workspaceId, table, options = {}) {

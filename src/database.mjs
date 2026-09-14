@@ -190,6 +190,26 @@ export async function createDataTable(workspacePath, displayName) {
   }
 }
 
+export async function deleteDataTable(workspacePath, tableName) {
+  const db = await openDatabase(workspacePath);
+  try {
+    const table = registeredTable(db, tableName);
+    if (table.source_kind !== 'table') throw new Error('Inbox tables are removed with their Inbox folder.');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(`DROP TABLE ${quote(table.table_name)}`);
+      db.prepare('DELETE FROM _runlet_tables WHERE table_name = ?').run(table.table_name);
+      db.exec('COMMIT');
+      return { deleted: table.table_name, name: table.display_name };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    db.close();
+  }
+}
+
 function tableDescriptor(db, tableName) {
   const table = registeredTable(db, tableName);
   const count = db.prepare(`SELECT COUNT(*) AS count FROM ${quote(table.table_name)}`).get().count;

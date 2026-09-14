@@ -77,9 +77,9 @@ needs-review/
 
 `runlet.json` identifies the folder as an Inbox. `INSTRUCTIONS.md` tells the AI what to do. The Inbox's extracted records live in a table in the workspace database. Successful source files belong in `processed/`; files requiring human judgment belong in `needs-review/`.
 
-The **Inbox Data** area first shows a familiar list of Inboxes. Open one to see its spreadsheet. You can edit cells, sort or search rows, add and remove rows or columns, move columns, and paste a block copied from Excel or CSV. Column types remain an internal detail for now. Runlet stores the tables together in a private SQLite database under `.runlet/`; that implementation detail stays out of the normal interface.
+The **Inbox Data** area first shows a searchable list of Inboxes. Open one to see its spreadsheet. You can edit cells, sort or search rows, add and remove rows or columns, rename or move columns, and paste a block copied from Excel or CSV. Column types remain an internal detail for now. Runlet stores the tables together in a private SQLite database under `.runlet/`; that implementation detail stays out of the normal interface.
 
-The separate **Tables** area uses the same spreadsheet interface for information someone creates themselves rather than information extracted by an Inbox. New Tables begin with one editable column, and rows and columns can be added from the table view or through a connected AI using Runlet. A column can be renamed, moved, or deleted from its three-dot menu.
+The separate **Tables** area uses the same spreadsheet interface for information someone creates themselves rather than information extracted by an Inbox. New Tables begin with one editable column. Table cards can be reordered, and rows and columns can be added from the table view or through a connected AI using Runlet. A column can be renamed, moved, or deleted from its three-dot menu. A standalone Table can be permanently deleted from its table view after confirmation; an Inbox table can only be removed with its Inbox folder.
 
 When an older Inbox is opened for the first time, Runlet imports its `data.csv` into the table and moves the original file into a hidden backup folder. Deleting an Inbox folder also deletes its table. Removing the workspace from Runlet never deletes the workspace folder or its database.
 
@@ -87,9 +87,9 @@ Turning an Inbox off preserves all of its files but removes it from normal AI pr
 
 ## Tools provided to AI apps
 
-Runlet connects to compatible AI apps through MCP. It provides tools for registered workspaces, files and Inboxes, Scripts, and Prompts. The AI can only access folders that have been explicitly registered as Runlet workspaces.
+Runlet connects to compatible AI apps through MCP. It provides tools for registered workspaces, files and Inboxes, Inbox Data and standalone Tables, Scripts, and Prompts. The AI can only access folders that have been explicitly registered as Runlet workspaces.
 
-For Inboxes, the AI uses `list_inboxes` to discover enabled work, `get_inbox` to read one Inbox and its instructions, and the Data tools to inspect or modify cells, rows, and columns. The ordinary file tools move completed source files. This is what makes requests such as “Use Runlet to modify the invoices table” work without asking the user to manage the database directly.
+For Inboxes, the AI uses `list_inboxes` to discover enabled work, `get_inbox` to read one Inbox and its exact table name, and the Data tools to inspect or modify cells, rows, and columns. The same Data tools work with standalone Tables. They deliberately provide structured operations instead of exposing the SQLite file directly. The ordinary file tools move completed source files. This is what makes requests such as “Use Runlet to modify the invoices table” work without asking the user to manage the database directly.
 
 To see the complete current list with a description of each tool, run:
 
