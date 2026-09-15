@@ -162,7 +162,7 @@ button { color: inherit; }
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  border: 1px solid var(--line);
+  border: 1px solid #cccdc7;
   border-radius: 8px;
   color: var(--ink);
   background: var(--paper);
@@ -376,8 +376,8 @@ button { color: inherit; }
 .data-list-breadcrumb i { color: #a3a49f; font-style: normal; font-weight: 500; }
 .data-visible-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .data-search { width: min(250px, 26vw); margin-left: auto; }
-.data-compact-action { height: 34px; padding: 5px 9px; border: 1px solid transparent; border-radius: 7px; color: var(--accent); background: transparent; cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.data-compact-action:hover { border-color: var(--line); background: var(--soft); }
+.data-compact-action { height: 38px; padding: 7px 11px; border: 1px solid #cccdc7; border-radius: 8px; color: var(--accent); background: var(--paper); cursor: pointer; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.data-compact-action:hover { background: var(--soft); }
 .data-grid-wrap { min-width: 0; min-height: 0; overflow: auto; flex: 1; background: var(--paper); }
 .data-grid { min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; font-size: 13px; }
 .data-grid th, .data-grid td { height: 38px; min-width: 140px; padding: 7px 10px; border-right: 1px solid #e1e2dc; border-bottom: 1px solid #e1e2dc; background: var(--paper); white-space: nowrap; }
