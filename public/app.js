@@ -130,13 +130,21 @@ function render() {
       <nav>
         <div class="nav-group">${sidebarNavItem('files', 'Files', state.files.length, 'Drop files onto a folder to copy them there. The original files stay where they are.')}</div>
         <div class="nav-group">${sidebarNavItem('data', 'Inbox Data', state.dataTables.filter((table) => table.source_kind !== 'table').length, selectedDataTable && view === 'data' && dataTable ? dataHelpText(dataTable) : 'Tables of information collected by your Inboxes.')}${sidebarNavItem('tables', 'Tables', state.dataTables.filter((table) => table.source_kind === 'table').length, selectedDataTable && view === 'tables' && dataTable ? dataHelpText(dataTable) : 'Spreadsheet-like data you create yourself. Your AI can also use Runlet to read and edit it.')}</div>
-        <div class="nav-group">${sidebarNavItem('apps', 'Apps', state.apps.length, 'Small programs that run locally.')}${sidebarNavItem('prompts', 'Prompts', state.prompts.length, 'Saved instructions for your AI.')}</div>
+        <div class="nav-group">${sidebarNavItem('apps', 'Apps', state.apps.length, appsInfoText())}${sidebarNavItem('prompts', 'Prompts', state.prompts.length, promptsInfoText())}</div>
         <div class="nav-group">${sidebarNavItem('connections', 'Connections', null, 'Connect Runlet to supported AI apps installed on this computer.')}</div>
       </nav>
     </aside>
     <section class="main ${collectionView ? 'collection-main' : ''} ${view === 'files' && !selectedApp && !selectedPrompt ? 'files-main' : ''} ${(view === 'data' || view === 'tables') && !selectedApp && !selectedPrompt ? 'data-main' : ''}">${content}</section>
   </main><div id="modal-root"></div><div id="toast-root"></div>`;
   bindEvents();
+}
+
+function appsInfoText() {
+  return 'Small programs that run locally.\n\nYou can ask your AI to use Runlet to run any App here by name.';
+}
+
+function promptsInfoText() {
+  return 'Saved instructions for your AI.\n\nYou can ask your AI to use any Prompt here by name.';
 }
 
 function sidebarNavItem(key, label, count, info) {

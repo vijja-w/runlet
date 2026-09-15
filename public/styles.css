@@ -367,6 +367,8 @@ button { color: inherit; }
 .data-detail .data-sheet { flex: 1; }
 .data-sheet-toolbar { min-height: 58px; padding: 9px 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); background: var(--paper); }
 .data-path-breadcrumb { min-width: 140px; max-width: 360px; flex: 1 1 260px; white-space: nowrap; }
+.breadcrumbs.data-path-breadcrumb button { padding: 3px 4px; font-size: 16px; font-weight: 650; }
+.breadcrumbs.data-path-breadcrumb span { font-size: 16px; }
 .data-table-copy { min-width: 0; }
 .data-list-breadcrumb { min-width: 0; display: flex; align-items: center; gap: 4px; overflow-x: auto; color: var(--ink); font-size: 16px; font-weight: 700; scrollbar-width: none; white-space: nowrap; }
 .data-list-breadcrumb::-webkit-scrollbar { display: none; }
@@ -554,7 +556,7 @@ button { color: inherit; }
   cursor: pointer;
   transition: color 120ms ease, background 120ms ease, box-shadow 120ms ease, opacity 120ms ease, transform 120ms ease;
 }
-.breadcrumbs button:hover { color: var(--ink); background: var(--soft); }
+.breadcrumbs button:hover { color: var(--ink); background: transparent; }
 .breadcrumbs button[aria-current="page"] { color: var(--ink); font-weight: 650; }
 .breadcrumbs span { color: #a3a49f; font-size: 11px; }
 .breadcrumbs.drag-active button { opacity: .48; }
