@@ -16,7 +16,7 @@ Inboxes are explicitly enabled folders containing runlet.json, INSTRUCTIONS.md, 
 
 The workspace can also contain standalone user-created Tables. Use list_data_tables to resolve the exact table_name and distinguish Inbox tables from standalone Tables, then use get_data_table before editing. Use the structured Data tools instead of opening or editing the SQLite database file directly. Row IDs returned by get_data_table identify rows for cell edits and deletion. write_data_rows can insert many rows or update matching rows using keyColumns. add_data_column creates a text column; columns first introduced by write_data_rows may be stored internally as text, integer, or real based on their values. Types are an internal detail and are not user-facing. Use rename_data_column and move_data_column for non-destructive structure changes, and delete tools only when the user explicitly requested deletion.`;
 
-const server = new McpServer({ name: 'runlet', version: '0.18.0' }, { instructions });
+const server = new McpServer({ name: 'runlet', version: '0.19.0' }, { instructions });
 const textResult = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
 const workspaceId = z.string().optional().describe('Registered workspace ID. Omit only when the intended workspace is already selected.');
 const encodedData = {
