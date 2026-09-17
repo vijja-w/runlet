@@ -100,9 +100,9 @@ async function installedClaudeExtension() {
   return null;
 }
 
-async function output(command, args) {
+async function output(command, args, options = {}) {
   try {
-    const result = await run(command, args);
+    const result = await run(command, args, options);
     return `${result.stdout || ''}\n${result.stderr || ''}`;
   } catch (error) {
     return `${error.stdout || ''}\n${error.stderr || ''}`;
@@ -110,13 +110,26 @@ async function output(command, args) {
 }
 
 function codexInstallations(value) {
-  return [...value.matchAll(/\brunlet@([A-Za-z0-9_-]+)\s+installed(?:,\s*enabled)?/gi)].map((match) => `runlet@${match[1]}`);
+  const source = String(value || '');
+  const jsonStart = source.indexOf('{');
+  const jsonEnd = source.lastIndexOf('}');
+  if (jsonStart >= 0 && jsonEnd > jsonStart) {
+    try {
+      const listing = JSON.parse(source.slice(jsonStart, jsonEnd + 1));
+      return (listing.installed || [])
+        .filter((plugin) => plugin?.installed !== false && /^runlet@[A-Za-z0-9_-]+$/i.test(plugin?.pluginId || ''))
+        .map((plugin) => plugin.pluginId);
+    } catch {}
+  }
+  return [...source.matchAll(/\brunlet@([A-Za-z0-9_-]+)\s+installed(?:,\s*enabled)?/gi)].map((match) => `runlet@${match[1]}`);
 }
 
 async function codexStatus() {
   const command = await findCodexExecutable();
   if (!command) return { id: 'codex', name: 'ChatGPT', available: false, connected: false, status: 'Not installed' };
-  const listing = await output(command, ['plugin', 'list']);
+  // Restrict the query to Runlet's local marketplace. An unfiltered listing also
+  // contacts Codex's remote catalog and can hold the Connections page for 25s.
+  const listing = await output(command, ['plugin', 'list', '--marketplace', 'runlet', '--json'], { timeout: 3_000 });
   const installations = codexInstallations(listing);
   return {
     id: 'codex',
@@ -245,7 +258,7 @@ export async function disconnect(provider) {
   if (provider === 'codex') {
     const command = await findCodexExecutable();
     if (!command) throw new Error('ChatGPT is not installed on this computer.');
-    const installations = codexInstallations(await output(command, ['plugin', 'list']));
+    const installations = codexInstallations(await output(command, ['plugin', 'list', '--marketplace', 'runlet', '--json'], { timeout: 3_000 }));
     for (const installation of installations) await run(command, ['plugin', 'remove', installation]);
     return codexStatus();
   }

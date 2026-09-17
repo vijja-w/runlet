@@ -481,7 +481,7 @@ function formatFileDate(value) {
 }
 
 function connectionsView() {
-  const cards = connectionsLoading
+  const cards = connectionsLoading && !state.connections?.length
     ? '<div class="empty compact"><p>Checking your local AI apps…</p></div>'
     : (state.connections || []).map((connection) => `<article class="connection-card" data-search-text="${escapeHtml(`${connection.name} ${connection.status} ${connection.note || ''}`.toLowerCase())}">
         <div class="connection-copy">
@@ -491,7 +491,7 @@ function connectionsView() {
         <button class="${connection.connected ? 'secondary' : 'primary'} connection-action" data-connection="${connection.id}" data-connected="${connection.connected}" data-action="${escapeHtml(connection.action || (connection.connected ? 'disconnect' : 'connect'))}" ${connection.available ? '' : 'disabled'}>${escapeHtml(connection.actionLabel || (connection.connected ? 'Disconnect' : 'Connect'))}</button>
       </article>`).join('');
   const search = state.connections?.length ? listSearch('connection', connectionSearch, 'Connections') : '';
-  return `<div class="page collection-page">${collectionToolbar(search, iconButton('refresh', 'Refresh', 'id="refresh-connections"'))}<div class="action-list connection-list" data-filter-list="connection">${cards}${noSearchResults('connection', 'Connections')}</div></div>`;
+  return `<div class="page collection-page">${collectionToolbar(search, iconButton('refresh', 'Refresh', `id="refresh-connections" ${connectionsLoading ? 'disabled' : ''}`))}<div class="action-list connection-list" data-filter-list="connection">${cards}${noSearchResults('connection', 'Connections')}</div></div>`;
 }
 
 function fileBreadcrumbs() {
@@ -1059,6 +1059,7 @@ async function saveListOrder(kind, list) {
 }
 
 async function loadConnections() {
+  if (connectionsLoading) return;
   connectionsLoading = true;
   render();
   try {
