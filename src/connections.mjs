@@ -11,6 +11,20 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const stateRoot = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet');
 const connectionRoot = path.join(stateRoot, 'connections');
 
+export function codexMcpConfig() {
+  return {
+    mcpServers: {
+      runlet: {
+        command: process.execPath,
+        args: [path.join(appRoot, 'bin', 'runlet.mjs'), 'mcp'],
+        env: { RUNLET_STATE_DIR: stateRoot },
+        enabled: true,
+        startup_timeout_sec: 20,
+      },
+    },
+  };
+}
+
 async function prepareMarketplace(provider) {
   const source = path.join(appRoot, 'distribution', provider);
   const destination = path.join(connectionRoot, provider);
@@ -18,12 +32,12 @@ async function prepareMarketplace(provider) {
   await fs.rm(destination, { recursive: true, force: true });
   await fs.mkdir(connectionRoot, { recursive: true });
   await fs.cp(source, destination, { recursive: true });
-  const mcp = {
+  const mcp = provider === 'codex' ? codexMcpConfig() : {
     mcpServers: {
       runlet: {
         command: process.execPath,
         args: [path.join(appRoot, 'bin', 'runlet.mjs'), 'mcp'],
-        ...(provider === 'codex' ? { enabled: true, startup_timeout_sec: 20 } : {}),
+        env: { RUNLET_STATE_DIR: stateRoot },
       },
     },
   };
