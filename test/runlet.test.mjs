@@ -14,6 +14,7 @@ process.env.RUNLET_STATE_DIR = path.join(temporaryRoot, 'state');
 const runlet = await import('../src/workspaces.mjs');
 const connections = await import('../src/connections.mjs');
 const { mcpToolGroups } = await import('../src/mcp-tools.mjs');
+const { defaultUserStateDirectory, resolveStateDirectory } = await import('../src/state-directory.mjs');
 
 function simplePdf(text) {
   const escaped = String(text).replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
@@ -49,6 +50,32 @@ function simpleDocx(text) {
 
 test.after(async () => {
   await fs.rm(temporaryRoot, { recursive: true, force: true });
+});
+
+test('uses one user state directory for bundled browser and MCP entry points', async () => {
+  const home = path.join(temporaryRoot, 'home');
+  const packageRoot = path.join(temporaryRoot, 'packaged-runlet');
+  await fs.mkdir(path.join(packageRoot, 'runtime'), { recursive: true });
+  await fs.writeFile(path.join(packageRoot, 'runtime', 'node'), 'bundled runtime marker');
+  const packaged = resolveStateDirectory(packageRoot, { env: {}, platform: 'darwin', home });
+  assert.equal(packaged, path.join(home, '.local', 'state', 'runlet'));
+  assert.equal(packaged, defaultUserStateDirectory({ env: {}, platform: 'darwin', home }));
+
+  const xdgState = path.join(temporaryRoot, 'xdg-state');
+  assert.equal(
+    resolveStateDirectory('/opt/runlet', { env: { XDG_STATE_HOME: xdgState }, platform: 'darwin', home, bundled: true }),
+    path.join(xdgState, 'runlet'),
+  );
+
+  const explicit = path.join(temporaryRoot, 'explicit-state');
+  assert.equal(
+    resolveStateDirectory('/opt/runlet', { env: { RUNLET_STATE_DIR: explicit }, platform: 'darwin', home, bundled: true }),
+    explicit,
+  );
+  assert.equal(
+    resolveStateDirectory('/work/runlet', { env: {}, platform: 'darwin', home, bundled: false }),
+    path.join('/work/runlet', '.runlet'),
+  );
 });
 
 test('creates a workspace with separate Apps and Prompts folders', async () => {
@@ -423,7 +450,7 @@ test('builds a Claude Desktop extension for the installed Runlet server', async 
   const manifest = JSON.parse(strFromU8(files['manifest.json']));
   assert.equal(manifest.manifest_version, '0.4');
   assert.equal(manifest.name, 'runlet-local');
-  assert.equal(manifest.version, '0.19.1');
+  assert.equal(manifest.version, '0.19.2');
   assert.equal(manifest.server.type, 'node');
   assert.equal(manifest.server.entry_point, 'server/index.mjs');
   assert.deepEqual(manifest.server.mcp_config.args, ['${__dirname}/server/index.mjs']);
@@ -469,7 +496,7 @@ test('detects an installed Claude extension as connected', async () => {
 
 test('shows version and update commands in the CLI', async () => {
   const versionResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'version']);
-  assert.equal(versionResult.stdout.trim(), '0.19.1');
+  assert.equal(versionResult.stdout.trim(), '0.19.2');
   const helpResult = await execFileAsync(process.execPath, ['bin/runlet.mjs', 'help']);
   assert.match(helpResult.stdout, /runlet update\s+Check for and install the latest release/);
   assert.match(helpResult.stdout, /runlet tools\s+Show the tools provided to connected AI apps/);

@@ -8,11 +8,11 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { formatMcpTools } from '../src/mcp-tools.mjs';
+import { resolveStateDirectory } from '../src/state-directory.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const runtimeDir = process.env.RUNLET_STATE_DIR
-  ? path.resolve(process.env.RUNLET_STATE_DIR)
-  : path.join(appRoot, '.runlet');
+const runtimeDir = resolveStateDirectory(appRoot);
+process.env.RUNLET_STATE_DIR ||= runtimeDir;
 const servicePath = path.join(runtimeDir, 'service.json');
 const logPath = path.join(runtimeDir, 'runlet.log');
 const serverPath = path.join(appRoot, 'src', 'server.mjs');

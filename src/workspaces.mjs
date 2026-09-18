@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
+import { resolveStateDirectory } from './state-directory.mjs';
 import {
   addDataRow as addWorkspaceDataRow,
   addDataColumn as addWorkspaceDataColumn,
@@ -25,7 +26,7 @@ import {
 } from './database.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const stateDir = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet');
+const stateDir = resolveStateDirectory(appRoot);
 const statePath = path.join(stateDir, 'state.json');
 const legacyStatePath = path.join(appRoot, '.workshop', 'state.json');
 const workerPath = path.join(appRoot, 'src', 'app-worker.mjs');

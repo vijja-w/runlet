@@ -5,10 +5,11 @@ import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { strToU8, zipSync } from 'fflate';
+import { resolveStateDirectory } from './state-directory.mjs';
 
 const execFileAsync = promisify(execFile);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const stateRoot = process.env.RUNLET_STATE_DIR ? path.resolve(process.env.RUNLET_STATE_DIR) : path.join(appRoot, '.runlet');
+const stateRoot = resolveStateDirectory(appRoot);
 const connectionRoot = path.join(stateRoot, 'connections');
 
 export function codexMcpConfig() {
